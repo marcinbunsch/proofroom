@@ -311,8 +311,8 @@ settings that made it work:
   - `--no-session-persistence --output-format stream-json`.
   - `--bare` can't be used: it only accepts API keys, and we rely on the
     user's own login.
-- **Codex:** `codex exec --json --ephemeral --ignore-user-config
-  --ignore-rules -s read-only`, plus:
+- **Codex:** `codex exec`, plus:
+  - `--json --ephemeral --ignore-user-config --ignore-rules -s read-only`.
   - `-c approval_policy="never"`.
   - `-c mcp_servers.proofroom.url=...` and
     `-c mcp_servers.proofroom.default_tools_approval_mode="approve"`.
@@ -392,12 +392,12 @@ ships inside `@pierre/diffs`.
 
 ### The workspace
 
-| Package | What it is |
-| --- | --- |
-| `packages/protocol` | Schemas, RPC procedure definitions, MCP tool definitions. No logic. Shared by server and UI. |
-| `packages/server` | Everything that does work, each part an Effect Layer: GitHub, repository copies, the agent runner, the MCP server, storage, the RPC handlers. |
-| `packages/ui` | React screens, atoms, the RPC client, the built-in visualizations. |
-| `packages/desktop` | The Electron shell: window, notifications, start at login, updates. |
+| Package             | What it is                                                                                                                                    |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/protocol` | Schemas, RPC procedure definitions, MCP tool definitions. No logic. Shared by server and UI.                                                  |
+| `packages/server`   | Everything that does work, each part an Effect Layer: GitHub, repository copies, the agent runner, the MCP server, storage, the RPC handlers. |
+| `packages/ui`       | React screens, atoms, the RPC client, the built-in visualizations.                                                                            |
+| `packages/desktop`  | The Electron shell: window, notifications, start at login, updates.                                                                           |
 
 Staffroom's `client` package has no equivalent here: the RPC client comes
 straight from the shared definitions in `protocol`.
@@ -442,24 +442,24 @@ Staffroom. Upgrades are planned work, not something done in passing.
 New pieces are pinned to the newest version that clears the 3-day rule
 **on the day they are installed**. As of 2026-10-23:
 
-| Layer | Choice | Version |
-| --- | --- | --- |
-| Runtime | Node | 26+ (engines-pinned) |
-| Package manager | pnpm workspace | 10.14.0 |
-| Language | TypeScript, native ESM, strict | 7.0.2 |
-| Everything Effect | `effect` (Schema, RPC, SQL, child processes, MCP server, atoms) | 4.0.5 (4.0.6 clears on 2026-10-25) |
-| Node runtime for Effect | `@effect/platform-node` | 4.0.5 |
-| Storage | `@effect/sql-sqlite-node` | 4.0.5 |
-| UI state | `@effect/atom-react` | 4.0.5 |
-| UI | React 19 + react-router 7 + Tailwind 4 (vite) | Staffroom's pins |
-| Code display | `@pierre/diffs` + `@pierre/highlights` | 1.6.1 + 0.2.0 (clear on 2026-10-24) |
-| Diagrams | `pele` | 1.7.0 |
-| Plugin bundling | esbuild | 0.28.2 |
-| Desktop | Electron | 44.0.0 (Staffroom's) |
-| Updates | `update-electron-app` | 3.3.0 |
-| Build | vite | 8.2.2 |
-| Tests | vitest + `@effect/vitest` | 5.0.5 + 4.0.5 |
-| Lint / format | oxlint / oxfmt | 1.80.0 / 0.65.0 |
+| Layer                   | Choice                                                          | Version                             |
+| ----------------------- | --------------------------------------------------------------- | ----------------------------------- |
+| Runtime                 | Node                                                            | 26+ (engines-pinned)                |
+| Package manager         | pnpm workspace                                                  | 10.14.0                             |
+| Language                | TypeScript, native ESM, strict                                  | 7.0.2                               |
+| Everything Effect       | `effect` (Schema, RPC, SQL, child processes, MCP server, atoms) | 4.0.5 (4.0.6 clears on 2026-10-25)  |
+| Node runtime for Effect | `@effect/platform-node`                                         | 4.0.5                               |
+| Storage                 | `@effect/sql-sqlite-node`                                       | 4.0.5                               |
+| UI state                | `@effect/atom-react`                                            | 4.0.5                               |
+| UI                      | React 19 + react-router 7 + Tailwind 4 (vite)                   | Staffroom's pins                    |
+| Code display            | `@pierre/diffs` + `@pierre/highlights`                          | 1.6.1 + 0.2.0 (clear on 2026-10-24) |
+| Diagrams                | `pele`                                                          | 1.7.0                               |
+| Plugin bundling         | esbuild                                                         | 0.28.2                              |
+| Desktop                 | Electron                                                        | 44.0.0 (Staffroom's)                |
+| Updates                 | `update-electron-app`                                           | 3.3.0                               |
+| Build                   | vite                                                            | 8.2.2                               |
+| Tests                   | vitest + `@effect/vitest`                                       | 5.0.5 + 4.0.5                       |
+| Lint / format           | oxlint / oxfmt                                                  | 1.80.0 / 0.65.0                     |
 
 Gone compared to Staffroom: zod (Effect Schema), Hono (Effect RPC), kysely and
 better-sqlite3 (Effect SQL), MobX (atoms), better-auth (no accounts), Flue
@@ -534,9 +534,11 @@ permission prompts along the way:
 
 ### Found in the spike
 
-- Your global git config may sign every commit with gpg. The app's own git
-  commands and the test repositories pass `-c commit.gpgsign=false`, or the
-  commit fails.
+- The app never makes commits: its git work is clone, fetch, worktree,
+  diff and merge-base. Only the tests do, when they build fixture
+  repositories. A developer's global git config may sign every commit with
+  gpg, so the test helpers pass `-c commit.gpgsign=false`, or the commit
+  fails.
 - `@pierre/diffs` draws a single hunk when given a patch that holds just the
   file header and that one `@@` section. Its `lineAnnotations` and
   `renderAnnotation` put comments and flags under any line. So chapters can

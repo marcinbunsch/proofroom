@@ -1,0 +1,13 @@
+packages:
+  - "packages/*"
+
+# Supply-chain guard: never install a dependency version published less than this
+# many minutes ago (4320 = 3 days). A compromised release that is caught and
+# yanked within a few days never makes it into the lockfile. Only gates *new*
+# resolutions (add/update); versions already pinned in the lockfile are kept.
+minimumReleaseAge: 4320
+
+# esbuild fetches its platform binary. SQLite is Node's built-in node:sqlite, so
+# there is no native addon to build.
+allowBuilds:
+  esbuild: true

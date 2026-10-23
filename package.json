@@ -1,0 +1,30 @@
+{
+  "name": "proofroom",
+  "version": "0.0.0",
+  "private": true,
+  "homepage": "https://github.com/marcinbunsch/proofroom#readme",
+  "bugs": "https://github.com/marcinbunsch/proofroom/issues",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marcinbunsch/proofroom.git"
+  },
+  "type": "module",
+  "scripts": {
+    "check": "pnpm -r check && pnpm test && pnpm lint && pnpm format:check",
+    "test": "pnpm -r --if-present test",
+    "lint": "oxlint --ignore-pattern effect",
+    "format": "oxfmt --ignore-path .gitignore --ignore-path .prettierignore",
+    "format:check": "oxfmt --ignore-path .gitignore --ignore-path .prettierignore --check"
+  },
+  "devDependencies": {
+    "@types/node": "26.4.0",
+    "oxfmt": "0.65.0",
+    "oxlint": "1.80.0",
+    "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": ">=26"
+  },
+  "packageManager": "pnpm@10.14.0"
+}
