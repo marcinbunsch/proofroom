@@ -448,7 +448,7 @@ New pieces are pinned to the newest version that clears the 3-day rule
 | Layer                   | Choice                                                          | Version                             |
 | ----------------------- | --------------------------------------------------------------- | ----------------------------------- |
 | Runtime                 | Node                                                            | 26+ (engines-pinned)                |
-| Package manager         | pnpm workspace                                                  | 10.14.0                             |
+| Package manager         | pnpm workspace                                                  | 10.34.7                             |
 | Language                | TypeScript, native ESM, strict                                  | 7.0.2                               |
 | Everything Effect       | `effect` (Schema, RPC, SQL, child processes, MCP server, atoms) | 4.0.5 (4.0.6 clears on 2026-10-25)  |
 | Node runtime for Effect | `@effect/platform-node`                                         | 4.0.5                               |
@@ -537,6 +537,13 @@ permission prompts along the way:
 
 ### Found in the spike
 
+- **pnpm 10.14.0 silently ignores `minimumReleaseAge`.** Staffroom pins that
+  version, so its 3-day rule has never been active. With it, Proofroom
+  installed a release of `@modelcontextprotocol/client` that was four hours
+  old. pnpm 10.34.7 enforces the rule, for ranges and exact versions alike,
+  and the lockfile was re-resolved under it. When bumping pnpm, check the rule
+  still holds: `pnpm add effect@<a release from today>` must fail with
+  `ERR_PNPM_NO_MATURE_MATCHING_VERSION`.
 - The app never makes commits: its git work is clone, fetch, worktree,
   diff and merge-base. Only the tests do, when they build fixture
   repositories. A developer's global git config may sign every commit with
