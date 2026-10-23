@@ -293,6 +293,47 @@ Codex's read-only sandbox). So a run never stops to ask permission. The MCP
 server listens on the laptop only and needs a secret that is new for every
 run.
 
+**Tested on 2026-10-23** (Claude Code 2.1.280, Codex 0.153.0). Both CLIs
+called Proofroom's MCP tools over HTTP. Both refused, without a prompt, an
+attempt to write a file and an attempt to reach the network. These are the
+settings that made it work:
+
+- **Claude Code:** `claude -p`, plus:
+  - `--mcp-config <file>` and `--strict-mcp-config`: only Proofroom's MCP
+    server is loaded.
+  - `--setting-sources ""`: the user's own settings, hooks and allow-lists
+    are left out.
+  - `--tools "Read,Grep,Glob,Bash"`.
+  - `--allowedTools` listing the Proofroom MCP tools and the read-only
+    commands, e.g. `"Bash(git log:*)"`.
+  - `--permission-mode dontAsk` and `--permission-prompts none`: anything
+    not allowed is refused, never asked about.
+  - `--no-session-persistence --output-format stream-json`.
+  - `--bare` can't be used: it only accepts API keys, and we rely on the
+    user's own login.
+- **Codex:** `codex exec --json --ephemeral --ignore-user-config
+  --ignore-rules -s read-only`, plus:
+  - `-c approval_policy="never"`.
+  - `-c mcp_servers.proofroom.url=...` and
+    `-c mcp_servers.proofroom.default_tools_approval_mode="approve"`.
+    Without the second one, every MCP call is refused.
+  - `-c web_search="disabled"`, and `features.memories`, `features.hooks`,
+    `features.plugins`, `features.apps` all set to false.
+  - `HOME` pointed at an empty folder, with `CODEX_HOME` still pointing at
+    the real `~/.codex` so the user's login works. Without this, Codex
+    loads the user's personal skills from `~/.agents/skills` even with
+    `--ignore-user-config`.
+
+Still to close before release:
+
+- `git diff --output=<file>` and `git log --output=<file>` write files, so
+  allowing a git command by name is not the same as allowing it to only
+  read. Claude Code's sandbox setting (which blocks file writes and network
+  at the operating-system level) would close this. Codex's read-only sandbox
+  already does.
+- Codex still lists its own built-in skills. Turn them off one by one with
+  `skills.config`.
+
 **The prompts** live in `packages/server/src/prompts/` as plain files kept in
 the repo.
 
@@ -343,6 +384,11 @@ ships inside `@pierre/diffs`.
    the same format. The Mermaid ones are drawn by Pele.
 4. A plugin the AI proposes is unreviewed code. It only ever renders inside a
    sandboxed iframe until you approve it.
+5. The server draws every Mermaid diagram with Pele the moment the MCP call
+   arrives. AI-written Mermaid often breaks on small things, such as
+   brackets inside a label that aren't in quotes. Pele reports the line,
+   column and a snippet, and that goes straight back to the agent as the
+   tool's error so it can fix it. A broken diagram never reaches the guide.
 
 ### The workspace
 
@@ -486,6 +532,16 @@ permission prompts along the way:
 5. Vite `?raw` imports need an ambient `declare module` in **every** package
    whose type-check compiles the importing file, not just the owner.
 
+### Found in the spike
+
+- Your global git config may sign every commit with gpg. The app's own git
+  commands and the test repositories pass `-c commit.gpgsign=false`, or the
+  commit fails.
+- `@pierre/diffs` draws a single hunk when given a patch that holds just the
+  file header and that one `@@` section. Its `lineAnnotations` and
+  `renderAnnotation` put comments and flags under any line. So chapters can
+  show one hunk, or part of one, using the same component as the Diff tab.
+
 ### Effect-specific
 
 - When unsure how Effect works, read its source instead of guessing. A
@@ -498,3 +554,9 @@ permission prompts along the way:
   `@effect/atom-react`. The older `@effect-atom/*` packages are still on
   Effect 3 and won't work with it.
 - `@effect/vitest` 4 needs vitest 5, not Staffroom's vitest 4.
+- The MCP server is `McpServer.layerHttp` with
+  `protocols: [McpProtocol.v2025_06_18, McpProtocol.v2025_03_26]`, mounted
+  with `HttpRouter.serve` on `NodeHttpServer.layer`. Tools are
+  `Tool.make` + `Toolkit.make`, with handlers from `toolkit.toLayer`, and
+  their parameters are checked against their Schema before the handler
+  runs. Read `effect/packages/effect/MCP.md`.
