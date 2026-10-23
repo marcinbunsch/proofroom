@@ -1,7 +1,8 @@
 # Bootstrap: Proofroom — understand a pull request without reading all of it
 
-Proofroom is a desktop app for reviewing GitHub pull requests. It is for one
-person, Marcin, and it runs on his laptop.
+Proofroom is a desktop app for reviewing GitHub pull requests. Each install
+is for one person, on their own laptop. It is open source (MIT) and ships as
+a signed Mac app that updates itself.
 
 You are still the reviewer. Every comment, approval and label change goes to
 GitHub as you, never as a bot. The AI's job is to help you understand the
@@ -14,7 +15,8 @@ diff is still there in its own tab, but the guide is where you spend your
 time.
 
 The AI runs through a command-line tool already installed on the laptop:
-Claude Code (`claude`) or Codex (`codex`). Proofroom stores no API keys.
+Claude Code (`claude`) or Codex (`codex`). GitHub is reached through the
+GitHub command-line tool (`gh`). Proofroom stores no API keys and no tokens.
 
 The name: a proofroom is the room in a print shop where proofs get checked
 before the print run. Package scope `@proofroom/*`, env prefix `PROOFROOM_*`,
@@ -211,6 +213,12 @@ These are the basics any review tool needs.
 - **Desktop app.** A Mac app with its own window and a dock icon. It starts
   at login so the inbox stays fresh. It sends notifications when a guide is
   ready and when someone asks for your review.
+- **First run.** A checklist makes sure `gh` is installed and logged in, and
+  that `claude` or `codex` is installed. Each missing piece comes with the
+  exact fix. Nothing personal is built in: your review notes, repository list
+  and AI choice are all Settings.
+- **Updates.** The app checks for a new version on launch and every few
+  hours, downloads it in the background, and offers a restart.
 
 **Not in the first version:** merging, assignees, switching drafts on and
 off, closing or reopening pull requests. Everything else on GitHub stays on
@@ -236,77 +244,251 @@ Then, in this order:
 8. HTML export.
 9. AI-proposed visualization types and the Library screen.
 
-## Tech — not decided yet
+## Tech
 
-The product above is settled. The technology hasn't been discussed yet. What
-follows is a starting point to argue with, not a plan.
+### The shape of the app
 
-### Starting point: the Staffroom stack
+1. **A desktop window and a local server.** Electron opens the window. A
+   Node server inside the app, reachable only from the laptop itself, does
+   all the work: talking to GitHub, managing repository copies, running the
+   AI tools, and storing everything. The desktop shell is borrowed from
+   Staffroom (`../staffroom/packages/desktop`).
+2. **Effect, end to end.** The server and the UI are both written with
+   Effect 4. Schema describes every piece of data. RPC connects the UI to
+   the server. Atoms hold the UI's state. Effect's own SQL, child-process
+   and MCP modules do the rest.
+3. **The UI talks to the server over Effect RPC.** Procedures are defined
+   once and shared by both sides. A guide streams: the UI subscribes to
+   `watchGuide`, gets the overview first, then each chapter as it is saved.
 
-Staffroom (`../staffroom`) is Marcin's other app. Its stack is known to work,
-and it already has a Mac desktop shell (Electron, running a local server
-inside the app). The versions it pins today:
+### How a guide gets written
+
+1. The app runs `git diff` itself and splits the change into hunks. Each hunk
+   gets a stable ID made from its file, its position and a hash of its
+   content.
+2. The app makes a `git worktree` at the pull request's exact latest commit,
+   from its own clone in `~/.proofroom/repos`. Your own checkouts are never
+   touched. The worktree is deleted when the run ends.
+3. It starts the **planner run**: `claude` or `codex`, without a terminal,
+   inside that worktree.
+4. The planner reads the code and writes back through Proofroom's **MCP
+   server**: the overview, the chapter outline, and which hunks (or line
+   ranges of hunks) go in which chapter or the appendix.
+5. The app checks that every changed line is placed exactly once. If not, it
+   tells the planner what is missing and the planner fixes it.
+6. The app starts the **chapter runs**, three at a time. Each one gets the
+   outline and only its own hunks. It writes its chapter, picks its
+   visualizations and adds flags through the same MCP server.
+7. Every MCP call is checked against its Schema the moment it arrives. A bad
+   call returns an error the agent can read and correct. A good call is
+   saved and streamed to the UI.
+8. "Go deeper" and questions about a spot in the guide reuse the chapter-run
+   path.
+
+**What the agents may do.** Read files, run read-only commands (`git log`,
+`git blame`, `rg`), and call Proofroom's MCP tools. They may not write
+files, use the network, or install anything. The app sets this once,
+through each tool's own controls (Claude Code's allowed-tools list and
+Codex's read-only sandbox). So a run never stops to ask permission. The MCP
+server listens on the laptop only and needs a secret that is new for every
+run.
+
+**The prompts** live in `packages/server/src/prompts/` as plain files kept in
+the repo.
+
+### Changes since your last review
+
+1. Build the pull request's full diff as it was at your review: the old
+   latest commit against where it branched from main.
+2. Build it again as it is now: the new latest commit against where it
+   branches from main now.
+3. Compare the two diffs, hunk by hunk.
+
+Whatever main brought in is in neither diff, so it cancels out. That works
+the same whether the author added commits, rebased, or merged main in. The
+result uses the same kind of hunk IDs, so the coverage check and
+commentable code work unchanged.
+
+### GitHub
+
+- **Everything goes through `gh`.** Reads and writes use `gh api` (REST and
+  GraphQL). Cloning and fetching use git with `gh` as the credential helper.
+  Proofroom never sees or stores a token. No octokit.
+- **The inbox** is one GraphQL query every 2 minutes, plus one whenever the
+  window comes to the front. Around 30 points an hour, against GitHub's limit
+  of 5,000.
+
+### Storage
+
+One SQLite file in `~/.proofroom`. Each piece of a guide is its own row:
+guides, chapters, hunk placements, flags, questions and answers,
+visualization data, review progress, and the inbox cache. Migrations run with
+Effect's Migrator.
+
+### Code display
+
+`@pierre/diffs` draws all code, both the hunks inside chapters and the Diff
+tab, so they look identical. Syntax colouring uses `@pierre/highlights`
+(`preferredHighlighter: 'highlights'`). Shiki stays as the fallback that
+ships inside `@pierre/diffs`.
+
+### Visualization plugins
+
+1. A plugin is a folder, `~/.proofroom/visualizations/<name>/`, with an
+   `index.tsx`. It exports a name, a Schema for its data, a "when to use
+   this" note for the AI, and a React component.
+2. The app bundles plugins with esbuild when it starts and whenever the
+   folder changes. No new release needed.
+3. The built-in types live in `packages/ui/src/visualizations/` in exactly
+   the same format. The Mermaid ones are drawn by Pele.
+4. A plugin the AI proposes is unreviewed code. It only ever renders inside a
+   sandboxed iframe until you approve it.
+
+### The workspace
+
+| Package | What it is |
+| --- | --- |
+| `packages/protocol` | Schemas, RPC procedure definitions, MCP tool definitions. No logic. Shared by server and UI. |
+| `packages/server` | Everything that does work, each part an Effect Layer: GitHub, repository copies, the agent runner, the MCP server, storage, the RPC handlers. |
+| `packages/ui` | React screens, atoms, the RPC client, the built-in visualizations. |
+| `packages/desktop` | The Electron shell: window, notifications, start at login, updates. |
+
+Staffroom's `client` package has no equivalent here: the RPC client comes
+straight from the shared definitions in `protocol`.
+
+### Testing
+
+1. The CLI agents sit behind one `AgentRunner` service (an Effect Layer).
+2. Tests swap in a fake runner that replays a script of MCP tool calls: good
+   calls, invalid calls, a chapter that never finishes, a run that gets
+   cancelled.
+3. Those scripts run against the real MCP server, a real SQLite database, and
+   small real git repositories built by the tests, including rebases and
+   merges from main.
+4. `pnpm test:live` is opt-in and runs the real `claude` and `codex` on one
+   small fixture pull request.
+
+### Open source and releases
+
+- **License:** MIT. Files copied from Staffroom (Apache-2.0) are Marcin's own
+  code, so he can relicense them, but say so in the commit that copies
+  them.
+- **Repo:** public at `github.com/marcinbunsch/proofroom`, with a README that
+  explains the "bring your own `gh` and `claude`/`codex`" model, and a
+  `SECURITY.md`.
+- **Releases:** push a version tag and GitHub Actions builds the Mac app,
+  signs and notarizes it, and attaches it to a GitHub release. This comes
+  from Staffroom's `release.yml`, `scripts/release.sh` and
+  `scripts/setup-signing.sh`, which port almost as-is. Apple Silicon only,
+  like Staffroom. Intel can be added later as a second build.
+- **Updates:** `update-electron-app`, which uses the free
+  `update.electronjs.org` service to read this repo's public GitHub releases.
+  That service only works for public repos with signed apps, which this is.
+  Each release also uploads the zip it needs.
+- **CI:** Staffroom's `ci.yml`: `pnpm check` and tests on every push.
+
+### Versions
+
+Exact pins (`save-exact=true`) and pnpm's `minimumReleaseAge: 4320` (3 days:
+a new release must be 3 days old before it can be installed). Both come from
+Staffroom. Upgrades are planned work, not something done in passing.
+
+New pieces are pinned to the newest version that clears the 3-day rule
+**on the day they are installed**. As of 2026-10-23:
 
 | Layer | Choice | Version |
 | --- | --- | --- |
 | Runtime | Node | 26+ (engines-pinned) |
 | Package manager | pnpm workspace | 10.14.0 |
 | Language | TypeScript, native ESM, strict | 7.0.2 |
-| HTTP | Hono + `@hono/zod-validator`, typed RPC via `hc<Routes>` | 4.13.5 / 0.9.1 |
-| Schemas | zod, `z.infer` as the only wire types | 4.4.3 |
-| Storage | SQLite via better-sqlite3, kysely for migrations | 13.0.3 / 0.29.5 |
-| UI | React 19 + react-router 7 + MobX 6 + Tailwind 4 (vite) | see ui/package.json |
-| Desktop | Electron | 44.0.0 |
+| Everything Effect | `effect` (Schema, RPC, SQL, child processes, MCP server, atoms) | 4.0.5 (4.0.6 clears on 2026-10-25) |
+| Node runtime for Effect | `@effect/platform-node` | 4.0.5 |
+| Storage | `@effect/sql-sqlite-node` | 4.0.5 |
+| UI state | `@effect/atom-react` | 4.0.5 |
+| UI | React 19 + react-router 7 + Tailwind 4 (vite) | Staffroom's pins |
+| Code display | `@pierre/diffs` + `@pierre/highlights` | 1.6.1 + 0.2.0 (clear on 2026-10-24) |
+| Diagrams | `pele` | 1.7.0 |
+| Plugin bundling | esbuild | 0.28.2 |
+| Desktop | Electron | 44.0.0 (Staffroom's) |
+| Updates | `update-electron-app` | 3.3.0 |
 | Build | vite | 8.2.2 |
-| Tests | vitest | 4.1.11 |
+| Tests | vitest + `@effect/vitest` | 5.0.5 + 4.0.5 |
 | Lint / format | oxlint / oxfmt | 1.80.0 / 0.65.0 |
-| Diagrams | Pele | new here |
-| GitHub | octokit | new here |
 
-The workspace would likely follow the same layout: `protocol` (zod schemas
-only), `server`, `client` (typed HTTP client), `ui`, `desktop`.
+Gone compared to Staffroom: zod (Effect Schema), Hono (Effect RPC), kysely and
+better-sqlite3 (Effect SQL), MobX (atoms), better-auth (no accounts), Flue
+(the AI runs in the user's own CLI), croner (no schedules), webhooks, and
+multi-user support.
 
-Some of Staffroom probably doesn't carry over, because Proofroom is
-one person on one laptop, starts generating only when asked, and stores no
-API keys. That would drop multi-user support, webhooks, sign-up and login,
-the AI model library Staffroom uses (Flue), and scheduling. Each one gets
-confirmed when we talk tech.
+### Building it, step by step
 
-### Questions for the tech conversation
+Each step leaves `pnpm check` passing.
 
-1. **Signing in to GitHub.** Borrow the token the `gh` command-line tool
-   already has, or have Proofroom do its own GitHub sign-in?
-2. **Running the AI tools.** How Proofroom starts `claude` and `codex`
-   without a terminal, gets the guide back piece by piece so chapters can
-   appear as they're written, and stops a run you cancel.
-3. **What a guide is made of.** The exact data format the AI produces, and
-   how the app checks it: valid visualization data, and every changed piece
-   of code placed somewhere.
-4. **The plugin format.** What a visualization plugin looks like on disk, how
-   the app loads one without a new release, and how a proposed one gets a
-   safe sample to show before you approve it.
-5. **Local copies of repositories.** Where they live, how they're kept up to
-   date, and how a guide gets the pull request's exact commit while another
-   guide runs on the same repository.
-6. **Comparing before and after, ignoring rebases.** How "what the pull
-   request does overall" is computed for guides to changes since your last
-   review.
-7. **Keeping the inbox fresh.** How often to ask GitHub for updates without
-   hitting its rate limits.
+1. **Scaffold the workspace.** Copy from `../staffroom`: `tsconfig.base.json`,
+   `.npmrc`, `pnpm-workspace.yaml` (keep `minimumReleaseAge` and the build
+   allowlist, trim what isn't used), `.gitignore`, and the root
+   `package.json` scripts. Rename `staffroom` to `proofroom`. Add the MIT
+   `LICENSE`, a README and `SECURITY.md`.
+2. **CI and release.** Port `ci.yml`, `release.yml`, `scripts/release.sh` and
+   `scripts/setup-signing.sh`. Cut an empty signed release early, so signing
+   problems show up before there is an app to ship.
+3. **protocol.** The first Schemas: a repository, a pull request, a hunk and
+   its ID, a guide, a chapter, a placement, a flag. The RPC procedures for the
+   inbox, and the MCP tools for the planner.
+4. **server skeleton.** Config and the `~/.proofroom` directory, SQLite with
+   migrations, the `gh` service, and the RPC server.
+5. **desktop and ui shells.** The Electron shell from Staffroom, opening the UI
+   from the local server. The first-run checklist for `gh` and
+   `claude`/`codex`.
+6. **The inbox.** The GraphQL query, the three sections, the repository list
+   in Settings, notifications.
+7. **Hunks and repository copies.** The app's own clone, worktrees per run,
+   the diff split into hunks with stable IDs, and the coverage check. All of
+   it tested against real fixture repositories.
+8. **The agent runner and MCP server.** The fake runner and its scripts come
+   first. Then the real `claude` and `codex` runners with their permission
+   settings.
+9. **The guide.** Planner run, coverage check, chapter runs, streaming into
+   the UI. The overview, chapters and hunks drawn with `@pierre/diffs`, the
+   built-in visualizations, flags.
+10. **The Diff tab and reviewing.** Draft review, comments from the guide and
+    the Diff tab, existing threads, reviewers, labels, CI status, submit with
+    a verdict.
+11. **Updates.** `update-electron-app` wired in, tested against a real signed
+    release.
+
+After that, the later product features in the order listed in "Build
+order" above.
+
+### First milestone
+
+Done when a signed build installed from a GitHub release does this, with no
+permission prompts along the way:
+
+1. It shows a real pull request from a listed repository in the inbox.
+2. It generates a full guide for it with `claude`.
+3. Every changed line of that pull request is either in a chapter or in the
+   appendix.
+4. A comment written on a hunk inside a chapter shows up on GitHub as part of
+   a submitted review.
 
 ### Mistakes Staffroom already paid for
-
-These apply if we stay on the same stack.
 
 1. pnpm: `pnpm --filter x pack` runs pnpm's own tarball command, not your
    `pack` script. Always `run pack`.
 2. CI exports unset secrets as empty strings. `process.env.X ?? fallback`
    keeps the empty string. Use `||` when empty must mean unset.
-3. In a Hono route chain, put fixed routes like `/sandbox/status` above routes
-   with a placeholder like `/:name/...`. Otherwise the placeholder can catch
-   them first.
-4. Vite `?raw` imports need an ambient `declare module` in **every** package
+3. A GitHub Actions step's `if` can't read `secrets` (GitHub rejects the
+   whole workflow file). Put the secret in `env` and test that instead, the
+   way Staffroom's `release.yml` does.
+4. The release workflow's draft release can't be seen under its tag until it
+   is published. That is how GitHub works, not a bug.
+5. Vite `?raw` imports need an ambient `declare module` in **every** package
    whose type-check compiles the importing file, not just the owner.
-5. Keep `save-exact=true` and `minimumReleaseAge: 4320` from Staffroom's
-   `.npmrc` / `pnpm-workspace.yaml`. Version upgrades are planned work, not
-   something done in passing.
+
+### Effect-specific
+
+- Use the atoms built into `effect` 4 (`effect/reactivity`) and
+  `@effect/atom-react`. The older `@effect-atom/*` packages are still on
+  Effect 3 and won't work with it.
+- `@effect/vitest` 4 needs vitest 5, not Staffroom's vitest 4.
