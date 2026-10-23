@@ -1,98 +1,32 @@
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { NodeServices } from "@effect/platform-node"
 import { afterEach, assert, beforeEach, describe, it } from "@effect/vitest"
 import type { GuideId } from "@proofroom/protocol"
-import { Effect, Layer, Option, Ref, Stream } from "effect"
-import { AppPaths } from "../src/AppPaths.ts"
+import { Effect, Option, Ref, Stream } from "effect"
 import { AgentRunFailed } from "../src/agents/agent-run.ts"
 import { checkCoverage } from "../src/guides/coverage.ts"
 import { GuideGenerationService } from "../src/guides/GuideGenerationService.ts"
-import { GitRemoteUrl } from "../src/pull-requests/GitRemoteUrl.ts"
 import { GuideQueryService } from "../src/storage/guides/GuideQueryService.ts"
 import { GuideSubscriptionService } from "../src/storage/guides/GuideSubscriptionService.ts"
-import { makeStorageLayer } from "../src/storage/StorageLayer.ts"
 import { expectAccepted, type ToolReply } from "./fixtures/AgentClient.ts"
-import { createCheckoutOrigin, fakeGitHub, pullRequestUrl } from "./fixtures/checkout-origin.ts"
+import { pullRequestUrl } from "./fixtures/checkout-origin.ts"
 import {
   chapterTitleIn,
-  fakeAgentRunner,
   hunkIdsByPath,
   type AgentScript,
   type AgentScripts,
 } from "./fixtures/FakeAgentRunner.ts"
+import {
+  chapterWriter,
+  completePlanner,
+  couponsChapter,
+  discountsChapter,
+  overview,
+  placeIn,
+} from "./fixtures/scripted-agents.ts"
+import { makeTestServerLayer } from "./fixtures/test-server.ts"
 import { realProcessesTimeout } from "./fixtures/timeouts.ts"
-
-// --- scripted agents ---------------------------------------------------------------
-
-const discountsChapter = {
-  key: "discounts",
-  title: "Discounts on cart totals",
-  purpose: "cartTotal takes a percentage and rounds after applying it",
-}
-const couponsChapter = {
-  key: "coupons",
-  title: "A first coupon",
-  purpose: "WELCOME10 is the first coupon code",
-}
-
-const overview = {
-  summary: "Cart totals can now take a percentage discount. A first coupon code uses it.",
-  diagram: {
-    source: 'flowchart LR\n  Checkout --> CartTotal["cartTotal(prices, discountPercent)"]',
-    caption: "Where totals are computed",
-  },
-}
-
-function placeIn(hunkId: string | undefined, chapterKey: string) {
-  return { hunkId, lines: null, target: { _tag: "chapter", chapterKey } }
-}
-
-// A planner that does everything right: overview, two chapters, every hunk
-// placed, plan finished.
-const completePlanner: AgentScript = (agent, run) =>
-  Effect.gen(function* () {
-    const hunkIds = hunkIdsByPath(run.prompt)
-    yield* expectAccepted(agent.callTool("set_overview", overview))
-    yield* expectAccepted(agent.callTool("add_chapter", discountsChapter))
-    yield* expectAccepted(agent.callTool("add_chapter", couponsChapter))
-    yield* expectAccepted(
-      agent.callTool("place_hunks", {
-        placements: [
-          placeIn(hunkIds.get("src/cart/total.ts"), "discounts"),
-          placeIn(hunkIds.get("src/cart/coupons.ts"), "coupons"),
-        ],
-      }),
-    )
-    yield* expectAccepted(agent.callTool("finish_plan", {}))
-    return "Plan accepted."
-  })
-
-// A chapter writer that writes its chapter, flags the rounding change in the
-// discounts chapter, and finishes.
-const chapterWriter: AgentScript = (agent, run) =>
-  Effect.gen(function* () {
-    const title = chapterTitleIn(run.prompt)
-    yield* expectAccepted(
-      agent.callTool("write_chapter", { body: `How ${title.toLowerCase()} work.`, diagram: null }),
-    )
-    if (title === discountsChapter.title) {
-      const totalHunkId = hunkIdsByPath(run.prompt).get("src/cart/total.ts")
-      yield* expectAccepted(
-        agent.callTool("add_flag", {
-          hunkId: totalHunkId,
-          line: 5,
-          kind: "hidden-behaviour-change",
-          note: "Totals are now rounded; callers that passed fractions get whole numbers back.",
-        }),
-      )
-    }
-    yield* expectAccepted(agent.callTool("finish_chapter", {}))
-    return "Chapter finished."
-  })
-
-// --- running a guide ---------------------------------------------------------------
 
 describe("GuideGenerationService", realProcessesTimeout, () => {
   let workspace = ""
@@ -103,20 +37,6 @@ describe("GuideGenerationService", realProcessesTimeout, () => {
     rmSync(workspace, { recursive: true, force: true })
   })
 
-  // Real git, real storage, real tool servers; only GitHub and the agent are
-  // stand-ins.
-  function guideGenerationLayer(scripts: AgentScripts) {
-    const { origin } = createCheckoutOrigin(join(workspace, "origin"))
-    return GuideGenerationService.layer.pipe(
-      Layer.provideMerge(makeStorageLayer(":memory:")),
-      Layer.provide(fakeAgentRunner(scripts)),
-      Layer.provide(fakeGitHub),
-      Layer.provide(Layer.succeed(GitRemoteUrl, () => origin.path)),
-      Layer.provide(AppPaths.fromHome(join(workspace, "home"))),
-      Layer.provide(NodeServices.layer),
-    )
-  }
-
   // Starts a guide for pull request 482 and waits until it is done or failed.
   function generateGuide(scripts: AgentScripts) {
     return Effect.gen(function* () {
@@ -126,7 +46,7 @@ describe("GuideGenerationService", realProcessesTimeout, () => {
       const guide = yield* waitUntilSettled(guideId)
       const hunks = yield* queries.loadHunks(guideId)
       return { guide, hunks }
-    }).pipe(Effect.provide(guideGenerationLayer(scripts)))
+    }).pipe(Effect.provide(makeTestServerLayer(workspace, scripts)))
   }
 
   function waitUntilSettled(guideId: GuideId) {

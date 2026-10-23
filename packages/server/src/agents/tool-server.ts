@@ -48,7 +48,9 @@ function toolServerLayer(tools: RegisteredTools, path: `/${string}`) {
   })
   return tools.pipe(
     Layer.provide(mcpServer),
-    HttpRouter.serve,
+    // No request log: an agent makes dozens of calls per run, and the run's
+    // own start and finish lines are what matter.
+    (registered) => HttpRouter.serve(registered, { disableLogger: true, disableListenLog: true }),
     // Port 0: the system picks a free one.
     Layer.provideMerge(NodeHttpServer.layer(() => createServer(), { port: 0, host: "127.0.0.1" })),
   )
