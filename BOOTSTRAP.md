@@ -1,8 +1,8 @@
 # Bootstrap: Proofroom — understand a pull request without reading all of it
 
 Proofroom is a desktop app for reviewing GitHub pull requests. Each install
-is for one person, on their own laptop. It is open source (MIT) and ships as
-a signed Mac app that updates itself.
+is for one person, on their own laptop. It is open source (Apache-2.0) and
+ships as a signed Mac app that updates itself.
 
 You are still the reviewer. Every comment, approval and label change goes to
 GitHub as you, never as a bot. The AI's job is to help you understand the
@@ -370,9 +370,9 @@ straight from the shared definitions in `protocol`.
 
 ### Open source and releases
 
-- **License:** MIT. Files copied from Staffroom (Apache-2.0) are Marcin's own
-  code, so he can relicense them, but say so in the commit that copies
-  them.
+- **License:** Apache-2.0, the same as Staffroom, so files copied across
+  keep their license. It is permissive and includes an explicit patent
+  grant.
 - **Repo:** public at `github.com/marcinbunsch/proofroom`, with a README that
   explains the "bring your own `gh` and `claude`/`codex`" model, and a
   `SECURITY.md`.
@@ -427,8 +427,8 @@ Each step leaves `pnpm check` passing.
 1. **Scaffold the workspace.** Copy from `../staffroom`: `tsconfig.base.json`,
    `.npmrc`, `pnpm-workspace.yaml` (keep `minimumReleaseAge` and the build
    allowlist, trim what isn't used), `.gitignore`, and the root
-   `package.json` scripts. Rename `staffroom` to `proofroom`. Add the MIT
-   `LICENSE`, a README and `SECURITY.md`.
+   `package.json` scripts. Rename `staffroom` to `proofroom`. Add the
+   Apache-2.0 `LICENSE` (copy Staffroom's), a README and `SECURITY.md`.
 2. **CI and release.** Port `ci.yml`, `release.yml`, `scripts/release.sh` and
    `scripts/setup-signing.sh`. Cut an empty signed release early, so signing
    problems show up before there is an app to ship.
