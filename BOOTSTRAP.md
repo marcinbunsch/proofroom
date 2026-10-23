@@ -488,6 +488,12 @@ permission prompts along the way:
 
 ### Effect-specific
 
+- When unsure how Effect works, read its source instead of guessing. A
+  reference copy of `github.com/Effect-TS/effect` lives in `./effect`, kept
+  out of git, checked out at the tag of the version we pin
+  (`effect@4.0.5`). `effect/LLMS.md` and `effect/ai-docs/` are written for
+  agents. Move the checkout to the new tag whenever the pin changes:
+  `git -C effect fetch --tags && git -C effect checkout effect@<version>`.
 - Use the atoms built into `effect` 4 (`effect/reactivity`) and
   `@effect/atom-react`. The older `@effect-atom/*` packages are still on
   Effect 3 and won't work with it.
