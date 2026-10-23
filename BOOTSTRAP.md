@@ -372,9 +372,10 @@ Effect's Migrator.
 ### Code display
 
 `@pierre/diffs` draws all code, both the hunks inside chapters and the Diff
-tab, so they look identical. Syntax colouring uses `@pierre/highlights`
-(`preferredHighlighter: 'highlights'`). Shiki stays as the fallback that
-ships inside `@pierre/diffs`.
+tab, so they look identical. Syntax colouring will use `@pierre/highlights`
+(`preferredHighlighter: 'highlights'`) once `@pierre/diffs` 1.6.1 clears the
+3-day rule; until then it is Shiki, which ships inside `@pierre/diffs` (see
+"Found in the spike").
 
 ### Visualization plugins
 
@@ -445,24 +446,24 @@ Staffroom. Upgrades are planned work, not something done in passing.
 New pieces are pinned to the newest version that clears the 3-day rule
 **on the day they are installed**. As of 2026-10-23:
 
-| Layer                   | Choice                                                          | Version                             |
-| ----------------------- | --------------------------------------------------------------- | ----------------------------------- |
-| Runtime                 | Node                                                            | 26+ (engines-pinned)                |
-| Package manager         | pnpm workspace                                                  | 10.34.7                             |
-| Language                | TypeScript, native ESM, strict                                  | 7.0.2                               |
-| Everything Effect       | `effect` (Schema, RPC, SQL, child processes, MCP server, atoms) | 4.0.5 (4.0.6 clears on 2026-10-25)  |
-| Node runtime for Effect | `@effect/platform-node`                                         | 4.0.5                               |
-| Storage                 | `@effect/sql-sqlite-node`                                       | 4.0.5                               |
-| UI state                | `@effect/atom-react`                                            | 4.0.5                               |
-| UI                      | React 19 + react-router 7 + Tailwind 4 (vite)                   | Staffroom's pins                    |
-| Code display            | `@pierre/diffs` + `@pierre/highlights`                          | 1.6.1 + 0.2.0 (clear on 2026-10-24) |
-| Diagrams                | `pele`                                                          | 1.7.0                               |
-| Plugin bundling         | esbuild                                                         | 0.28.2                              |
-| Desktop                 | Electron                                                        | 44.0.0 (Staffroom's)                |
-| Updates                 | `update-electron-app`                                           | 3.3.0                               |
-| Build                   | vite                                                            | 8.2.2                               |
-| Tests                   | vitest + `@effect/vitest`                                       | 5.0.5 + 4.0.5                       |
-| Lint / format           | oxlint / oxfmt                                                  | 1.80.0 / 0.65.0                     |
+| Layer                   | Choice                                                          | Version                            |
+| ----------------------- | --------------------------------------------------------------- | ---------------------------------- |
+| Runtime                 | Node                                                            | 26+ (engines-pinned)               |
+| Package manager         | pnpm workspace                                                  | 10.34.7                            |
+| Language                | TypeScript, native ESM, strict                                  | 7.0.2                              |
+| Everything Effect       | `effect` (Schema, RPC, SQL, child processes, MCP server, atoms) | 4.0.5 (4.0.6 clears on 2026-10-25) |
+| Node runtime for Effect | `@effect/platform-node`                                         | 4.0.5                              |
+| Storage                 | `@effect/sql-sqlite-node`                                       | 4.0.5                              |
+| UI state                | `@effect/atom-react`                                            | 4.0.5                              |
+| UI                      | React 19 + react-router 7 + Tailwind 4 (vite)                   | Staffroom's pins                   |
+| Code display            | `@pierre/diffs`, Shiki highlighting                             | 1.5.2 (1.6.1 clears on 2026-10-24) |
+| Diagrams                | `pele`                                                          | 1.7.0                              |
+| Plugin bundling         | esbuild                                                         | 0.28.2                             |
+| Desktop                 | Electron                                                        | 44.0.0 (Staffroom's)               |
+| Updates                 | `update-electron-app`                                           | 3.3.0                              |
+| Build                   | vite                                                            | 8.2.2                              |
+| Tests                   | vitest + `@effect/vitest`                                       | 5.0.5 + 4.0.5                      |
+| Lint / format           | oxlint / oxfmt                                                  | 1.80.0 / 0.65.0                    |
 
 Gone compared to Staffroom: zod (Effect Schema), Hono (Effect RPC), kysely and
 better-sqlite3 (Effect SQL), MobX (atoms), better-auth (no accounts), Flue
@@ -537,6 +538,12 @@ permission prompts along the way:
 
 ### Found in the spike
 
+- **`@pierre/diffs` 1.6.0 can't load its themes in a browser.** Its code calls
+  a `@pierre/theming` feature that only exists in theming 1.0.2, but it pins
+  theming 1.0.1, so every diff renders empty, without an error. 1.6.1 (with
+  theming 1.0.2 and `@pierre/highlights` 0.2.0) fixes it. Until 1.6.1 clears
+  the 3-day rule, Proofroom uses 1.5.2 with Shiki highlighting. Then switch to
+  1.6.1 and `preferredHighlighter: "highlights"`.
 - **pnpm 10.14.0 silently ignores `minimumReleaseAge`.** Staffroom pins that
   version, so its 3-day rule has never been active. With it, Proofroom
   installed a release of `@modelcontextprotocol/client` that was four hours

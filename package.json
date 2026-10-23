@@ -11,6 +11,7 @@
   },
   "type": "module",
   "scripts": {
+    "dev": "pnpm --parallel --filter @proofroom/server --filter @proofroom/ui dev",
     "check": "pnpm -r check && pnpm test && pnpm lint && pnpm format:check",
     "test": "pnpm -r --if-present test",
     "lint": "oxlint --ignore-pattern effect",
