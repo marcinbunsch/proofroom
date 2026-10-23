@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises"
 import { dirname } from "node:path"
 import { Effect, Layer } from "effect"
-import { AppPaths } from "../app-paths.ts"
+import { AppPaths } from "../AppPaths.ts"
 import { GuideMutationService } from "./guides/GuideMutationService.ts"
 import { GuideQueryService } from "./guides/GuideQueryService.ts"
 import { GuideSubscriptionService } from "./guides/GuideSubscriptionService.ts"
