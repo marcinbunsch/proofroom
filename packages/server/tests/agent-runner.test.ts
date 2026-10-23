@@ -9,8 +9,9 @@ import { AgentExecutables } from "../src/agents/AgentExecutables.ts"
 import { AgentRunnerService } from "../src/agents/AgentRunnerService.ts"
 import { AgentRunFailed, type AgentRun } from "../src/agents/agent-run.ts"
 import { StandInCli } from "./fixtures/StandInCli.ts"
+import { realProcessesTimeout } from "./fixtures/timeouts.ts"
 
-describe("AgentRunnerService", () => {
+describe("AgentRunnerService", realProcessesTimeout, () => {
   let workspace = ""
   let checkout = ""
   beforeEach(() => {

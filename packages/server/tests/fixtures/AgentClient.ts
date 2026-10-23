@@ -45,6 +45,17 @@ export class AgentClient {
   }
 }
 
+// For scripted agents: a call the script expects to go through. A refusal
+// stops the test with the server's message rather than surfacing later as a
+// confusing failed guide.
+export function expectAccepted(reply: Effect.Effect<ToolReply>): Effect.Effect<string> {
+  return reply.pipe(
+    Effect.flatMap(({ isError, text }) =>
+      isError ? Effect.die(`tool call refused: ${text}`) : Effect.succeed(text),
+    ),
+  )
+}
+
 function textOf(content: unknown): string {
   if (!Array.isArray(content)) return ""
   return content

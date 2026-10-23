@@ -264,11 +264,12 @@ Then, in this order:
 ### How a guide gets written
 
 1. The app runs `git diff` itself and splits the change into hunks. Each hunk
-   gets a stable ID made from its file, its position and a hash of its
-   content.
+   gets a stable ID made from its file and a hash of its content.
 2. The app makes a `git worktree` at the pull request's exact latest commit,
    from its own clone in `~/.proofroom/repos`. Your own checkouts are never
-   touched. The worktree is deleted when the run ends.
+   touched. The planner and the chapter runs of one guide share this
+   worktree, since none of them can write to it. It is deleted when the
+   guide is finished.
 3. It starts the **planner run**: `claude` or `codex`, without a terminal,
    inside that worktree.
 4. The planner reads the code and writes back through Proofroom's **MCP
@@ -334,8 +335,10 @@ Still to close before release:
 - Codex still lists its own built-in skills. Turn them off one by one with
   `skills.config`.
 
-**The prompts** live in `packages/server/src/prompts/` as plain files kept in
-the repo.
+**The prompts** are TypeScript functions next to the runs that use them
+(`guides/planning/planner-prompt.ts`, `guides/chapters/chapter-prompt.ts`).
+Each prompt is built from the pull request's data, such as the list of hunks
+and the outline, and a function keeps the text and that data in one place.
 
 ### Changes since your last review
 
@@ -488,7 +491,7 @@ Each step leaves `pnpm check` passing.
    `claude`/`codex`.
 6. **The inbox.** The GraphQL query, the three sections, the repository list
    in Settings, notifications.
-7. **Hunks and repository copies.** The app's own clone, worktrees per run,
+7. **Hunks and repository copies.** The app's own clone, a worktree per guide,
    the diff split into hunks with stable IDs, and the coverage check. All of
    it tested against real fixture repositories.
 8. **The agent runner and MCP server.** The fake runner and its scripts come

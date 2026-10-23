@@ -5,26 +5,17 @@ import { NodeServices } from "@effect/platform-node"
 import { afterEach, assert, beforeEach, describe, it } from "@effect/vitest"
 import { Effect, Exit, Layer } from "effect"
 import { AppPaths } from "../src/AppPaths.ts"
-import { GitHubService, type PullRequestDetails } from "../src/pull-requests/GitHubService.ts"
 import { GitRemoteUrl } from "../src/pull-requests/GitRemoteUrl.ts"
 import { InvalidPullRequestUrl } from "../src/pull-requests/pull-request-url.ts"
 import { PullRequestService } from "../src/pull-requests/PullRequestService.ts"
-import { OriginRepository } from "./fixtures/OriginRepository.ts"
-
-const pullRequestUrl = "https://github.com/acme/checkout/pull/482"
-
-const discountDetails: PullRequestDetails = {
-  title: "Add percentage discounts to cart totals",
-  body: "Lets checkout apply a coupon's percentage to the cart total.",
-  baseRefName: "main",
-  commits: [{ messageHeadline: "Add discountPercent to cartTotal", messageBody: "" }],
-}
-
-// GitHubService is the one part that talks to the network, so tests replace it.
-const fakeGitHub = Layer.succeed(
-  GitHubService,
-  GitHubService.of({ fetchPullRequest: () => Effect.succeed(discountDetails) }),
-)
+import {
+  createCheckoutOrigin,
+  fakeGitHub,
+  pullRequestUrl,
+  type CheckoutOrigin,
+} from "./fixtures/checkout-origin.ts"
+import type { OriginRepository } from "./fixtures/OriginRepository.ts"
+import { realProcessesTimeout } from "./fixtures/timeouts.ts"
 
 // The real PullRequestService and real git, cloning from a repository on disk
 // into a Proofroom home folder of its own.
@@ -37,44 +28,7 @@ function pullRequestLayer(home: string, origin: OriginRepository) {
   )
 }
 
-// The repository as GitHub would hold it for pull request 482:
-//
-//   main:          "Add cart totals" ── "Document shipping"
-//                          \
-//   add-discounts:          "Add discountPercent to cartTotal"   (refs/pull/482/head)
-//
-// "Document shipping" landed on main after the branch was cut, so it must not
-// show up in the pull request's diff.
-function createCheckoutOrigin(path: string) {
-  const origin = OriginRepository.create(path)
-  const branchPointSha = origin.commit("Add cart totals", {
-    "src/cart/total.ts": [
-      "export function cartTotal(prices: number[]): number {",
-      "  return prices.reduce((sum, price) => sum + price, 0)",
-      "}",
-      "",
-    ].join("\n"),
-  })
-  origin.switchTo("add-discounts", { create: true })
-  const pullRequestSha = origin.commit("Add discountPercent to cartTotal", {
-    "src/cart/total.ts": [
-      "export function cartTotal(prices: number[], discountPercent = 0): number {",
-      "  const sum = prices.reduce((total, price) => total + price, 0)",
-      "  return Math.round(sum * (1 - discountPercent / 100))",
-      "}",
-      "",
-    ].join("\n"),
-    "src/cart/coupons.ts": 'export const WELCOME_COUPON = "WELCOME10"\n',
-  })
-  origin.publishPullRequest(482, pullRequestSha)
-  origin.switchTo("main")
-  origin.commit("Document shipping", { "docs/shipping.md": "Orders over 50 ship free.\n" })
-  return { origin, branchPointSha, pullRequestSha }
-}
-
-type CheckoutOrigin = ReturnType<typeof createCheckoutOrigin>
-
-describe("PullRequestService", () => {
+describe("PullRequestService", realProcessesTimeout, () => {
   let workspace = ""
   beforeEach(() => {
     workspace = mkdtempSync(join(tmpdir(), "proofroom-pull-requests-"))
