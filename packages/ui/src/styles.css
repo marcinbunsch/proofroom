@@ -17,6 +17,15 @@
   --pele-radius: 6px;
 }
 
+/* Pele puts an edge's label on the edge itself, which strikes it through. A
+   white halo behind the letters keeps it readable. */
+.pele-edge-label text {
+  paint-order: stroke;
+  stroke: var(--color-white);
+  stroke-width: 5px;
+  stroke-linejoin: round;
+}
+
 /* Text the agents wrote, in Markdown. */
 .agent-text p {
   margin-block: 0.75rem;

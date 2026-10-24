@@ -2,15 +2,16 @@ import { useAtomSet } from "@effect/atom-react"
 import type { Chapter, Excerpt, Flag, GuideId, Hunk, HunkId, Placement } from "@proofroom/protocol"
 import { useMemo } from "react"
 import { AgentText } from "../components/AgentText.tsx"
-import { MermaidDiagram } from "../components/MermaidDiagram.tsx"
 import { StatusBadge } from "../components/StatusBadge.tsx"
+import { VisualView } from "../visuals/VisualView.tsx"
 import { chapterCode, flagLocation, flagsOutsideExcerpts } from "./chapter-code.ts"
 import { FlagNote } from "./FlagNote.tsx"
 import { diffScrollTargetAtom, guideTabAtom } from "./guide-atoms.ts"
 import { HunkView } from "./HunkView.tsx"
 
-// One chapter. It explains its part of the change in text and a diagram, and
-// guides the reader's focus with a few excerpts of code worth seeing. The rest
+// One chapter. It explains its part of the change in a little text and a few
+// visuals, and guides the reader's focus with a few excerpts of code worth
+// seeing. The rest
 // of its code is one click away on the Diff tab.
 //
 // While it waits to be written, the planner's one-line purpose stands in.
@@ -40,7 +41,9 @@ export function ChapterView({
         <AgentText markdown={chapter.body} className="text-[15px] text-stone-800" />
       )}
       {chapter.failure !== null && <p className="mt-3 text-sm text-red-700">{chapter.failure}</p>}
-      {chapter.diagram !== null && <MermaidDiagram diagram={chapter.diagram} />}
+      {chapter.visuals.map((visual, index) => (
+        <VisualView key={index} visual={visual} />
+      ))}
       {chapter.excerpts.map((excerpt, index) => (
         <ExcerptView
           key={`${excerpt.hunkId}-${index}`}

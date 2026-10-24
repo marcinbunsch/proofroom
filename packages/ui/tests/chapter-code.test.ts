@@ -76,7 +76,7 @@ const discountsChapter: Chapter = {
   purpose: "cartTotal takes a percentage",
   status: "done",
   body: "The total is rounded after the discount.",
-  diagram: null,
+  visuals: [],
   excerpts: [{ hunkId: totalHunk.id, lines: { start: 3, end: 4 }, why: "The rounding." }],
   flags: [roundingFlag, removedFlag],
   failure: null,
