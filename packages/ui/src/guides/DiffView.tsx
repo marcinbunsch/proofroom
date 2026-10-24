@@ -1,7 +1,9 @@
 import type { Flag, GuideId, Hunk } from "@proofroom/protocol"
-import { useMemo } from "react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
+import { useEffect, useMemo } from "react"
 import { CodeDiff } from "./CodeDiff.tsx"
 import { groupHunksByFile, type DiffFile } from "./diff-files.ts"
+import { diffScrollTargetAtom } from "./guide-atoms.ts"
 import { filePatch } from "./hunk-patch.ts"
 
 // The Diff tab: the whole pull request as an ordinary diff, file by file, with
@@ -17,6 +19,7 @@ export function DiffView({
   readonly flags: ReadonlyArray<Flag>
 }) {
   const files = useMemo(() => groupHunksByFile(hunks), [hunks])
+  useScrollToRequestedFile()
   return (
     <div className="mt-8">
       <p className="text-sm text-stone-500">
@@ -40,6 +43,21 @@ function FileDiff({
 }) {
   const patch = useMemo(() => filePatch(file.hunks), [file])
   return (
-    <CodeDiff guideId={guideId} path={file.path} patch={patch} hunks={file.hunks} flags={flags} />
+    <div data-file-path={file.path}>
+      <CodeDiff guideId={guideId} path={file.path} patch={patch} hunks={file.hunks} flags={flags} />
+    </div>
   )
+}
+
+// A chapter's "Open in Diff" names a file to show; scroll to it once, then
+// forget it.
+function useScrollToRequestedFile() {
+  const requestedPath = useAtomValue(diffScrollTargetAtom)
+  const clearRequest = useAtomSet(diffScrollTargetAtom)
+  useEffect(() => {
+    if (requestedPath === null) return
+    const fileElement = document.querySelector(`[data-file-path="${CSS.escape(requestedPath)}"]`)
+    fileElement?.scrollIntoView({ block: "start" })
+    clearRequest(null)
+  }, [requestedPath, clearRequest])
 }

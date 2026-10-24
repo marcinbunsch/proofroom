@@ -13,6 +13,10 @@ export const selectedGuideIdAtom = Atom.make<GuideId | null>(null)
 export type GuideTab = "guide" | "diff"
 export const guideTabAtom = Atom.make<GuideTab>("guide")
 
+// The file the Diff tab should scroll to when it opens, if a chapter's "Open
+// in Diff" asked for one. The Diff tab clears it once it has scrolled.
+export const diffScrollTargetAtom = Atom.make<string | null>(null)
+
 // Every guide, newest first. Refreshed after a guide is started.
 export const guideListAtom = ProofroomClient.query("listGuides", undefined, {
   reactivityKeys: ["guides"],
