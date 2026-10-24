@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@effect/atom-react": "4.0.5",
-    "@pierre/diffs": "1.5.2",
+    "@pierre/diffs": "1.6.1",
     "@proofroom/protocol": "workspace:*",
     "effect": "4.0.5",
     "pele": "1.7.0",

@@ -25,11 +25,7 @@ export function HunkView({
       <PatchDiff<Flag>
         patch={patch}
         disableWorkerPool
-        // Shiki, the default highlighter, for now. The faster
-        // `preferredHighlighter: "highlights"` needs @pierre/diffs 1.6, and
-        // 1.6.0 can't load its themes in a browser (see BOOTSTRAP.md). Switch
-        // once 1.6.1 clears the 3-day release age.
-        options={{ diffStyle: "unified" }}
+        options={{ diffStyle: "unified", preferredHighlighter: "highlights" }}
         lineAnnotations={annotations}
         renderAnnotation={(annotation) => <FlagNote flag={annotation.metadata} />}
       />

@@ -372,10 +372,8 @@ Effect's Migrator.
 ### Code display
 
 `@pierre/diffs` draws all code, both the hunks inside chapters and the Diff
-tab, so they look identical. Syntax colouring will use `@pierre/highlights`
-(`preferredHighlighter: 'highlights'`) once `@pierre/diffs` 1.6.1 clears the
-3-day rule; until then it is Shiki, which ships inside `@pierre/diffs` (see
-"Found in the spike").
+tab, so they look identical. Syntax colouring uses `@pierre/highlights`
+(`preferredHighlighter: 'highlights'`).
 
 ### Visualization plugins
 
@@ -457,7 +455,7 @@ New pieces are pinned to the newest version that clears the 3-day rule
 | Storage                 | `@effect/sql-sqlite-node`                                       | 4.0.5                              |
 | UI state                | `@effect/atom-react`                                            | 4.0.5                              |
 | UI                      | React 19 + react-router 7 + Tailwind 4 (vite)                   | Staffroom's pins                   |
-| Code display            | `@pierre/diffs`, Shiki highlighting                             | 1.5.2 (1.6.1 clears on 2026-10-24) |
+| Code display            | `@pierre/diffs` + `@pierre/highlights`                          | 1.6.1 + 0.2.0                      |
 | Diagrams                | `pele`                                                          | 1.7.0                              |
 | Plugin bundling         | esbuild                                                         | 0.28.2                             |
 | Desktop                 | Electron                                                        | 44.0.0 (Staffroom's)               |
@@ -543,8 +541,11 @@ permission prompts along the way:
   a `@pierre/theming` feature that only exists in theming 1.0.2, but it pins
   theming 1.0.1, so every diff renders empty, without an error. 1.6.1 (with
   theming 1.0.2 and `@pierre/highlights` 0.2.0) fixes it. Until 1.6.1 clears
-  the 3-day rule, Proofroom uses 1.5.2 with Shiki highlighting. Then switch to
-  1.6.1 and `preferredHighlighter: "highlights"`.
+  the 3-day rule, Proofroom used 1.5.2 with Shiki highlighting. On
+  2026-10-24 Marcin chose to take 1.6.1 early, through a
+  `minimumReleaseAgeExclude` list in `pnpm-workspace.yaml` pinned to exactly
+  those three versions. **Remove that list after 2026-10-24 18:05 UTC**, when
+  all three are 3 days old.
 - **pnpm 10.14.0 silently ignores `minimumReleaseAge`.** Staffroom pins that
   version, so its 3-day rule has never been active. With it, Proofroom
   installed a release of `@modelcontextprotocol/client` that was four hours
