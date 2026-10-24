@@ -27,8 +27,9 @@ jobs:
           cache: pnpm
 
       - name: Install
-        # --frozen-lockfile fails rather than resolving anything new, which is
-        # also what keeps the workspace's minimumReleaseAge guard out of CI's way.
+        # --frozen-lockfile fails rather than resolving anything new. pnpm 11
+        # still checks every locked version against minimumReleaseAge, so a
+        # release too new to trust fails here just as it does locally.
         run: pnpm install --frozen-lockfile
 
       - name: Check
