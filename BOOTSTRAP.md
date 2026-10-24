@@ -439,9 +439,10 @@ straight from the shared definitions in `protocol`.
 
 ### Versions
 
-Exact pins (`save-exact=true`) and pnpm's `minimumReleaseAge: 4320` (3 days:
-a new release must be 3 days old before it can be installed). Both come from
-Staffroom. Upgrades are planned work, not something done in passing.
+Exact pins (`saveExact: true`) and pnpm's `minimumReleaseAge: 4320` (3 days:
+a new release must be 3 days old before it can be installed), both in
+`pnpm-workspace.yaml`. Both come from Staffroom. Upgrades are planned work,
+not something done in passing.
 
 New pieces are pinned to the newest version that clears the 3-day rule
 **on the day they are installed**. As of 2026-10-23:
@@ -449,7 +450,7 @@ New pieces are pinned to the newest version that clears the 3-day rule
 | Layer                   | Choice                                                          | Version                            |
 | ----------------------- | --------------------------------------------------------------- | ---------------------------------- |
 | Runtime                 | Node                                                            | 26+ (engines-pinned)               |
-| Package manager         | pnpm workspace                                                  | 10.34.7                            |
+| Package manager         | pnpm workspace                                                  | 11.28.6                            |
 | Language                | TypeScript, native ESM, strict                                  | 7.0.2                              |
 | Everything Effect       | `effect` (Schema, RPC, SQL, child processes, MCP server, atoms) | 4.0.5 (4.0.6 clears on 2026-10-25) |
 | Node runtime for Effect | `@effect/platform-node`                                         | 4.0.5                              |
@@ -547,10 +548,14 @@ permission prompts along the way:
 - **pnpm 10.14.0 silently ignores `minimumReleaseAge`.** Staffroom pins that
   version, so its 3-day rule has never been active. With it, Proofroom
   installed a release of `@modelcontextprotocol/client` that was four hours
-  old. pnpm 10.34.7 enforces the rule, for ranges and exact versions alike,
-  and the lockfile was re-resolved under it. When bumping pnpm, check the rule
-  still holds: `pnpm add effect@<a release from today>` must fail with
-  `ERR_PNPM_NO_MATURE_MATCHING_VERSION`.
+  old. The lockfile was re-resolved under a pnpm that enforces the rule, and
+  Proofroom is now on pnpm 11. pnpm 11 also re-checks every lockfile entry on
+  each install ("Lockfile passes supply-chain policies"). When bumping pnpm,
+  check the rule still holds: `pnpm add effect@<a release from today>` must
+  fail with `ERR_PNPM_NO_MATURE_MATCHING_VERSION`.
+- **pnpm 11 ignores `save-exact` in `.npmrc`**, without a warning, and saves
+  ranges like `^7.0.0` again. The setting lives in `pnpm-workspace.yaml` as
+  `saveExact: true`.
 - The app never makes commits: its git work is clone, fetch, worktree,
   diff and merge-base. Only the tests do, when they build fixture
   repositories. A developer's global git config may sign every commit with
