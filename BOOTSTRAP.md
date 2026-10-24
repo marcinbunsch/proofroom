@@ -271,7 +271,9 @@ Then, in this order:
 ### How a guide gets written
 
 1. The app runs `git diff` itself and splits the change into hunks. Each hunk
-   gets a stable ID made from its file and a hash of its content.
+   gets a stable ID made from its file and a hash of its changed and context
+   lines, not its position, so a hunk keeps its ID when edits above it move
+   it down the file.
 2. The app makes a `git worktree` at the pull request's exact latest commit,
    from its own clone in `~/.proofroom/repos`. Your own checkouts are never
    touched. The planner and the chapter runs of one guide share this

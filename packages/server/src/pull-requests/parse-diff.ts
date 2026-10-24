@@ -20,7 +20,8 @@ function parseFileSection(sectionLines: ReadonlyArray<string>): Array<Hunk> {
 
   const file = parseFileHeader(sectionLines.slice(0, firstHunkIndex))
   const hunks = splitBefore(sectionLines.slice(firstHunkIndex), isHunkHeader)
-  return hunks.map((hunkLines) => parseHunk(file, hunkLines))
+  const hunkId = hunkIdsFor(file.path)
+  return hunks.map((hunkLines) => parseHunk(file, hunkLines, hunkId(hunkLines)))
 }
 
 // --- the file header -------------------------------------------------------------
@@ -70,11 +71,11 @@ function unquotePath(quotedPath: string): string {
 
 // --- a hunk ----------------------------------------------------------------------
 
-function parseHunk(file: DiffFile, hunkLines: ReadonlyArray<string>): Hunk {
+function parseHunk(file: DiffFile, hunkLines: ReadonlyArray<string>, id: HunkId): Hunk {
   const [headerLine = "", ...bodyLines] = hunkLines
   const header = parseHunkHeader(headerLine)
   return {
-    id: makeHunkId(file.path, hunkLines),
+    id,
     path: file.path,
     oldPath: file.oldPath,
     fileStatus: file.fileStatus,
@@ -130,22 +131,38 @@ function numberLines(
   return lines
 }
 
-// The same hunk gets the same id in every diff it appears in: the id is a hash
-// of the path and the hunk's own lines. The empty string that follows the very
-// last hunk of a diff is left out, so that hunk's id doesn't depend on whether
-// another file comes after it. (An empty line of the file is " ", never "".)
+// The same hunk gets the same id in every diff it appears in, which is how a
+// delta guide recognises the hunks you already reviewed. The id is a hash of
+// the path and the hunk's lines, without its `@@` header: lines added higher
+// up the file move a hunk and change its header, but it is the same change.
+//
+// A file can hold the same change twice, e.g. one import removed from two
+// places. The second gets the count of earlier copies in its hash, so ids stay
+// unique within a diff.
+//
+// The empty string that follows the very last hunk of a diff is left out, so
+// that hunk's id doesn't depend on whether another file comes after it. (An
+// empty line of the file is " ", never "".)
 //
 // 10 hex characters (40 bits): a pull request has thousands of hunks at most,
 // so a collision is vanishingly unlikely, and the id stays short enough for an
 // agent to copy without mistakes.
-function makeHunkId(path: string, hunkLines: ReadonlyArray<string>): HunkId {
-  const ownLines = hunkLines.filter((line) => line !== "")
-  const digest = createHash("sha256")
-    .update(path)
-    .update("\0")
-    .update(ownLines.join("\n"))
-    .digest("hex")
-  return HunkId.make(`h${digest.slice(0, 10)}`)
+//
+// Returns a function that gives each of one file's hunks its id, in diff order.
+function hunkIdsFor(path: string): (hunkLines: ReadonlyArray<string>) => HunkId {
+  const copiesSeen = new Map<string, number>()
+  return ([, ...bodyLines]) => {
+    const body = bodyLines.filter((line) => line !== "").join("\n")
+    const copy = copiesSeen.get(body) ?? 0
+    copiesSeen.set(body, copy + 1)
+    const digest = createHash("sha256")
+      .update(path)
+      .update("\0")
+      .update(body)
+      .update(copy === 0 ? "" : `\0${copy}`)
+      .digest("hex")
+    return HunkId.make(`h${digest.slice(0, 10)}`)
+  }
 }
 
 // --- splitting -------------------------------------------------------------------

@@ -71,6 +71,32 @@ describe("parseUnifiedDiff", () => {
     expect(couponsId(parseUnifiedDiff(onlyCoupons))).toBe(couponsId(hunks))
   })
 
+  it("same change moved down the file -> same id", () => {
+    const formatTotalHunk = (parsed: ReturnType<typeof parseUnifiedDiff>) =>
+      parsed.filter((hunk) => hunk.path === "src/cart/total.ts")[1]
+    const movedDown = checkoutDiff.replace("@@ -20,3 +21,4 @@", "@@ -40,3 +44,4 @@")
+
+    const moved = formatTotalHunk(parseUnifiedDiff(movedDown))
+
+    expect(moved?.newStart).toBe(44)
+    expect(moved?.id).toBe(formatTotalHunk(hunks)?.id)
+  })
+
+  it("the same change twice in one file -> two distinct ids", () => {
+    const twice = parseUnifiedDiff(`diff --git a/src/cart/total.ts b/src/cart/total.ts
+index 3f1c2aa..8b0d9e1 100644
+--- a/src/cart/total.ts
++++ b/src/cart/total.ts
+@@ -3,1 +3,0 @@
+-import { legacyRound } from "./legacy.ts"
+@@ -30,1 +29,0 @@
+-import { legacyRound } from "./legacy.ts"
+`)
+
+    expect(twice).toHaveLength(2)
+    expect(twice[0]?.id).not.toBe(twice[1]?.id)
+  })
+
   it("every hunk -> a distinct short id", () => {
     const ids = hunks.map((hunk) => hunk.id)
     expect(new Set(ids).size).toBe(ids.length)
