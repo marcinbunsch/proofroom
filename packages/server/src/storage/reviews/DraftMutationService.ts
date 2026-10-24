@@ -27,8 +27,9 @@ export interface DraftMutations {
     body: string,
   ) => Effect.Effect<DraftComment, DraftCommentNotFound>
   readonly deleteDraft: (draftCommentId: DraftCommentId) => Effect.Effect<void>
-  // After a review is submitted, its drafts are on GitHub and go.
-  readonly deleteDraftsOfGuide: (guideId: GuideId) => Effect.Effect<void>
+  // After a review is submitted, the drafts it sent are on GitHub and go. A
+  // draft edited since it was sent stays: GitHub only has its old text.
+  readonly deleteSentDrafts: (sent: ReadonlyArray<DraftComment>) => Effect.Effect<void>
 }
 
 export class DraftMutationService extends Context.Service<DraftMutationService, DraftMutations>()(
@@ -57,8 +58,12 @@ function makeDraftMutationService() {
         Effect.asVoid(sql`DELETE FROM draftComments WHERE id = ${draftCommentId}`).pipe(
           Effect.orDie,
         ),
-      deleteDraftsOfGuide: (guideId) =>
-        Effect.asVoid(sql`DELETE FROM draftComments WHERE guideId = ${guideId}`).pipe(Effect.orDie),
+      deleteSentDrafts: (sent) =>
+        Effect.forEach(
+          sent,
+          ({ id, body }) => sql`DELETE FROM draftComments WHERE id = ${id} AND body = ${body}`,
+          { discard: true },
+        ).pipe(sql.withTransaction, Effect.orDie),
     })
   })
 }
