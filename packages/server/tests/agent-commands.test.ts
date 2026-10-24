@@ -165,4 +165,33 @@ describe("readCodexResult", () => {
       )
     }),
   )
+
+  // Regression: any error event failed the run, even one Codex recovered from.
+  it.effect("an error Codex recovered from, and a stray line -> the run still succeeds", () =>
+    Effect.gen(function* () {
+      const result = yield* readCodexResult(
+        [
+          events({ type: "thread.started" }),
+          "warning: proceeding, even though we could not update PATH",
+          events(
+            { type: "error", message: "Reconnecting... 1/5" },
+            { type: "item.completed", item: { type: "agent_message", text: "Plan accepted." } },
+            { type: "turn.completed", usage: { input_tokens: 57125 } },
+          ),
+        ].join("\n"),
+      )
+      assert.deepStrictEqual(result, { finalMessage: "Plan accepted.", costUsd: null })
+    }),
+  )
+
+  it.effect("output ends before the turn does -> AgentRunFailed with the last error", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        readCodexResult(
+          events({ type: "thread.started" }, { type: "error", message: "Reconnecting... 5/5" }),
+        ),
+      )
+      assert.strictEqual(error.message, "Codex stopped with an error: Reconnecting... 5/5")
+    }),
+  )
 })
