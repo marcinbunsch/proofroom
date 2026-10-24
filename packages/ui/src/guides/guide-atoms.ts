@@ -9,6 +9,10 @@ import { ProofroomClient } from "../rpc/ProofroomClient.ts"
 // The guide shown in the main pane, or none.
 export const selectedGuideIdAtom = Atom.make<GuideId | null>(null)
 
+// Which tab of the open guide is showing: the guide itself, or its whole diff.
+export type GuideTab = "guide" | "diff"
+export const guideTabAtom = Atom.make<GuideTab>("guide")
+
 // Every guide, newest first. Refreshed after a guide is started.
 export const guideListAtom = ProofroomClient.query("listGuides", undefined, {
   reactivityKeys: ["guides"],

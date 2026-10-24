@@ -1,6 +1,7 @@
 import { HunkId, type Hunk } from "@proofroom/protocol"
 import { describe, expect, it } from "vitest"
-import { hunkPatch } from "../src/guides/hunk-patch.ts"
+import { groupHunksByFile } from "../src/guides/diff-files.ts"
+import { filePatch, hunkPatch } from "../src/guides/hunk-patch.ts"
 
 // cartTotal gains a discount: the signature changes on line 3, the return on
 // lines 7-9.
@@ -85,5 +86,66 @@ describe("hunkPatch", () => {
   it("added file -> /dev/null as the old side", () => {
     const patch = hunkPatch({ ...discountHunk, fileStatus: "added" }, null)
     expect(patch.split("\n")[1]).toBe("--- /dev/null")
+  })
+})
+
+// A second change further down total.ts, and a hunk in another file.
+const thresholdHunk: Hunk = {
+  ...discountHunk,
+  id: HunkId.make("h7c2e91d04a"),
+  oldStart: 20,
+  oldLineCount: 1,
+  newStart: 21,
+  newLineCount: 2,
+  sectionHeading: "export function formatTotal(cents: number): string {",
+  lines: [
+    { kind: "context", text: "}", oldLineNumber: 20, newLineNumber: 21 },
+    {
+      kind: "addition",
+      text: "export const FREE_SHIPPING_THRESHOLD_CENTS = 50_00",
+      oldLineNumber: null,
+      newLineNumber: 22,
+    },
+  ],
+}
+const couponHunk: Hunk = {
+  ...discountHunk,
+  id: HunkId.make("h77b20c4e19"),
+  path: "src/cart/coupons.ts",
+  fileStatus: "added",
+  oldStart: 0,
+  oldLineCount: 0,
+  newStart: 1,
+  newLineCount: 1,
+  lines: [
+    {
+      kind: "addition",
+      text: 'export const WELCOME_COUPON = "WELCOME10"',
+      oldLineNumber: null,
+      newLineNumber: 1,
+    },
+  ],
+}
+
+describe("filePatch", () => {
+  it("two hunks of one file -> one file header, then each hunk's section", () => {
+    const sectionHeaders = filePatch([discountHunk, thresholdHunk])
+      .split("\n")
+      .filter((line) => line.startsWith("diff --git") || line.startsWith("@@"))
+    expect(sectionHeaders).toEqual([
+      "diff --git a/src/cart/total.ts b/src/cart/total.ts",
+      "@@ -1,6 +1,7 @@",
+      "@@ -20,1 +21,2 @@ export function formatTotal(cents: number): string {",
+    ])
+  })
+})
+
+describe("groupHunksByFile", () => {
+  it("hunks in diff order -> one entry per file, hunks kept in order", () => {
+    const files = groupHunksByFile([discountHunk, thresholdHunk, couponHunk])
+    expect(files.map((file) => [file.path, file.hunks.map((hunk) => hunk.id)])).toEqual([
+      ["src/cart/total.ts", ["h3fa9c01b2e", "h7c2e91d04a"]],
+      ["src/cart/coupons.ts", ["h77b20c4e19"]],
+    ])
   })
 })
