@@ -1,21 +1,26 @@
 import { useAtomSet } from "@effect/atom-react"
 import type { DraftComment } from "@proofroom/protocol"
+import { Exit } from "effect"
 import { useState } from "react"
+import { SaveFailed } from "../components/SaveFailed.tsx"
 import { deleteDraftAtom, draftsChanged, updateDraftAtom } from "./review-atoms.ts"
 
 // A draft comment under its line, marked as not sent yet. It can be edited or
 // deleted until the review is submitted.
 //
-// The text being edited is kept in the component while the edit is open.
+// The text being edited is kept in the component while the edit is open, and
+// stays open with it if saving fails, so nothing typed is lost.
 export function DraftCommentView({ draft }: { readonly draft: DraftComment }) {
   const [editedBody, setEditedBody] = useState<string | null>(null)
+  const [saveFailed, setSaveFailed] = useState(false)
   const updateDraft = useAtomSet(updateDraftAtom, { mode: "promiseExit" })
   const deleteDraft = useAtomSet(deleteDraftAtom)
   const reactivityKeys = [draftsChanged(draft.guideId)]
 
   const saveEdit = async (body: string) => {
-    await updateDraft({ payload: { draftCommentId: draft.id, body }, reactivityKeys })
-    setEditedBody(null)
+    const exit = await updateDraft({ payload: { draftCommentId: draft.id, body }, reactivityKeys })
+    setSaveFailed(Exit.isFailure(exit))
+    if (Exit.isSuccess(exit)) setEditedBody(null)
   }
 
   return (
@@ -51,10 +56,14 @@ export function DraftCommentView({ draft }: { readonly draft: DraftComment }) {
             value={editedBody}
             onChange={(event) => setEditedBody(event.target.value)}
           />
-          <div className="mt-2 flex justify-end gap-2">
+          <div className="mt-2 flex items-center justify-end gap-2">
+            {saveFailed && <SaveFailed />}
             <button
               className="rounded px-3 py-1 text-stone-600 hover:bg-white"
-              onClick={() => setEditedBody(null)}
+              onClick={() => {
+                setEditedBody(null)
+                setSaveFailed(false)
+              }}
             >
               Cancel
             </button>
