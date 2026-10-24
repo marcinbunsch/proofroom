@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, assert, beforeEach, describe, it } from "@effect/vitest"
 import { ChapterKey, type GuideId } from "@proofroom/protocol"
-import { Effect, Option, Ref, Stream } from "effect"
+import { Deferred, Effect, Option, Ref, Stream } from "effect"
 import { AgentRunFailed } from "../src/agents/agent-run.ts"
 import { checkCoverage } from "../src/guides/coverage.ts"
 import { GuideGenerationService } from "../src/guides/GuideGenerationService.ts"
@@ -389,6 +389,50 @@ describe("GuideGenerationService", realProcessesTimeout, () => {
         guide.chapters[0]?.excerpts.map((excerpt) => excerpt.lines),
         [{ start: 3, end: 5 }],
       )
+    }),
+  )
+
+  it.effect("chapter run stops without finish_chapter -> that chapter fails, saying why", () =>
+    Effect.gen(function* () {
+      const quittingWriter: AgentScript = (agent, run) =>
+        chapterTitleIn(run.prompt) === couponsChapter.title
+          ? agent
+              .callTool("write_chapter", { body: "Coupons.", diagram: null })
+              .pipe(Effect.as("Written, I think."))
+          : chapterWriter(agent, run)
+
+      const { guide } = yield* generateGuide({ planner: completePlanner, chapter: quittingWriter })
+      const coupons = guide.chapters.find((chapter) => chapter.key === "coupons")
+
+      assert.strictEqual(guide.status, "done")
+      assert.strictEqual(coupons?.status, "failed")
+      assert.include(coupons?.failure, "stopped before finishing")
+      assert.include(coupons?.failure, "Written, I think.")
+    }),
+  )
+
+  it.effect("app shuts down while a guide is being written -> its agent is stopped", () =>
+    Effect.gen(function* () {
+      const plannerStarted = yield* Deferred.make<void>()
+      const plannerStopped = yield* Deferred.make<void>()
+      const endlessPlanner: AgentScript = () =>
+        Deferred.succeed(plannerStarted, undefined).pipe(
+          Effect.andThen(Effect.never),
+          Effect.onInterrupt(() => Deferred.succeed(plannerStopped, undefined)),
+        )
+
+      // The layer, and so the app, shuts down when this inner effect ends.
+      yield* Effect.gen(function* () {
+        const generation = yield* GuideGenerationService
+        yield* generation.start(pullRequestUrl, "claude")
+        yield* Deferred.await(plannerStarted)
+      }).pipe(
+        Effect.provide(
+          makeTestServerLayer(workspace, { planner: endlessPlanner, chapter: chapterWriter }),
+        ),
+      )
+
+      assert.isTrue(yield* Deferred.isDone(plannerStopped))
     }),
   )
 })
