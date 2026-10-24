@@ -3,7 +3,8 @@
 // space and no newline at the end.
 //
 // Written the way Proofroom's own `git diff` call prints it: a/ b/ prefixes,
-// rename detection, three lines of context.
+// rename detection, three lines of context, and a tab after a path that holds
+// a space.
 export const checkoutDiff = `diff --git a/src/cart/total.ts b/src/cart/total.ts
 index 3f1c2aa..8b0d9e1 100644
 --- a/src/cart/total.ts
@@ -51,8 +52,8 @@ index 1a2b3c4..5d6e7f8 100644
  export const showTaxes = true
 diff --git a/docs/checkout flow.md b/docs/checkout flow.md
 index 0a1b2c3..4d5e6f7 100644
---- a/docs/checkout flow.md
-+++ b/docs/checkout flow.md
+--- a/docs/checkout flow.md\t
++++ b/docs/checkout flow.md\t
 @@ -1 +1 @@
 -Checkout has three steps.
 +Checkout has four steps.

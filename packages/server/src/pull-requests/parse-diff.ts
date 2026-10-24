@@ -46,7 +46,8 @@ function parseFileHeader(headerLines: ReadonlyArray<string>): DiffFile {
 }
 
 // The path from the `---` or `+++` line. `/dev/null` means the file doesn't
-// exist on that side, which comes back as null.
+// exist on that side, which comes back as null. git ends the line with a tab
+// when the path holds a space, so patch tools can tell where the path ends.
 function findPath(
   headerLines: ReadonlyArray<string>,
   marker: string,
@@ -54,7 +55,7 @@ function findPath(
 ): string | null {
   const line = headerLines.find((headerLine) => headerLine.startsWith(marker))
   if (line === undefined) return null
-  const rawPath = line.slice(marker.length)
+  const rawPath = line.slice(marker.length).replace(/\t$/, "")
   if (rawPath === "/dev/null") return null
   const path = rawPath.startsWith('"') ? unquotePath(rawPath) : rawPath
   return path.startsWith(prefix) ? path.slice(prefix.length) : path
