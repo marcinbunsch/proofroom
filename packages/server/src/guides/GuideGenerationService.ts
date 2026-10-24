@@ -56,6 +56,13 @@ function makeGuideGenerationService() {
     const writingServices = yield* Effect.context<GuideWritingServices>()
     // Guides being written. They stop when the app shuts down.
     const guidesBeingWritten = yield* FiberSet.make()
+    // A guide whose writer stopped before finishing it, by a quit, a crash or
+    // a reload, never will be finished. Guides another Proofroom process is
+    // still writing, such as the generate-guide script's, are left alone.
+    yield* mutations.failAbandonedGuides(
+      "Proofroom stopped before this guide was finished.",
+      isProcessRunning,
+    )
 
     const start = (pullRequestUrl: string, cli: AgentCli) =>
       Effect.gen(function* () {
@@ -66,8 +73,9 @@ function makeGuideGenerationService() {
           headSha: pullRequest.headSha,
           mergeBaseSha: pullRequest.mergeBaseSha,
           cli,
+          hunks: pullRequest.hunks,
+          writerPid: process.pid,
         })
-        yield* mutations.saveHunks(guideId, pullRequest.hunks)
         yield* FiberSet.run(
           guidesBeingWritten,
           writeGuide(guideId, pullRequest, cli).pipe(Effect.provideContext(writingServices)),
@@ -143,6 +151,17 @@ type GuideWritingServices =
   | GuideMutationService
   | GuideQueryService
   | ChildProcessSpawner.ChildProcessSpawner
+
+// Signal 0 checks that a process exists without touching it. EPERM means it
+// exists but belongs to another user.
+function isProcessRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return error instanceof Error && "code" in error && error.code === "EPERM"
+  }
+}
 
 function failureReason(cause: Cause.Cause<unknown>): string {
   const failure = Cause.findErrorOption(cause)

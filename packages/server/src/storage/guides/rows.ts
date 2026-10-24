@@ -38,6 +38,7 @@ export const GuideRow = Schema.Struct({
   overviewDiagram: Schema.NullOr(Schema.fromJsonString(MermaidDiagram)),
   failure: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
+  writerPid: Schema.NullOr(Schema.Int),
 })
 export type GuideRow = typeof GuideRow.Type
 

@@ -17,6 +17,8 @@ const discountGuide: NewGuide = {
   headSha: "9f3c1e2a7b4d5c6e8f0a1b2c3d4e5f6a7b8c9d0e",
   mergeBaseSha: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
   cli: "claude",
+  hunks: [],
+  writerPid: process.pid,
 }
 
 const signatureHunk: Hunk = {
@@ -243,17 +245,74 @@ describe("guide storage", () => {
     }).pipe(Effect.provide(StorageLayer)),
   )
 
-  it.effect("hunks saved -> loaded back in diff order", () =>
+  it.effect("guide created with its hunks -> hunks loaded back in diff order", () =>
     Effect.gen(function* () {
       const mutations = yield* GuideMutationService
       const queries = yield* GuideQueryService
-      const guideId = yield* mutations.createGuide(discountGuide)
 
-      yield* mutations.saveHunks(guideId, [signatureHunk, couponHunk])
+      const guideId = yield* mutations.createGuide({
+        ...discountGuide,
+        hunks: [signatureHunk, couponHunk],
+      })
       const hunks = yield* queries.loadHunks(guideId)
 
       assert.deepStrictEqual(hunks, [signatureHunk, couponHunk])
     }).pipe(Effect.provide(StorageLayer)),
+  )
+
+  it.effect(
+    "abandoned guides failed -> they and their unfinished chapters fail; finished guides, and ones still being written, untouched",
+    () =>
+      Effect.gen(function* () {
+        const mutations = yield* GuideMutationService
+        const queries = yield* GuideQueryService
+        const stoppedWriter = 4101
+        const runningWriter = 4102
+        const finishedId = yield* mutations.createGuide({
+          ...discountGuide,
+          writerPid: stoppedWriter,
+        })
+        yield* mutations.setGuideStatus(finishedId, "done", null)
+        const stillWrittenId = yield* mutations.createGuide({
+          ...discountGuide,
+          writerPid: runningWriter,
+        })
+        const unfinishedId = yield* mutations.createGuide({
+          ...discountGuide,
+          writerPid: stoppedWriter,
+        })
+        yield* mutations.addChapter(unfinishedId, {
+          key: discountsChapter,
+          title: "Discounts",
+          purpose: "cartTotal takes a percentage",
+        })
+        yield* mutations.addChapter(unfinishedId, {
+          key: couponsChapter,
+          title: "Coupons",
+          purpose: "A first coupon code",
+        })
+        yield* mutations.setChapterStatus(unfinishedId, discountsChapter, "done", null)
+        yield* mutations.setGuideStatus(unfinishedId, "writing", null)
+
+        yield* mutations.failAbandonedGuides("Proofroom stopped.", (pid) => pid === runningWriter)
+        const finished = yield* queries.loadGuide(finishedId)
+        const stillWritten = yield* queries.loadGuide(stillWrittenId)
+        const unfinished = yield* queries.loadGuide(unfinishedId)
+
+        assert.strictEqual(finished.status, "done")
+        assert.strictEqual(stillWritten.status, "planning")
+        assert.deepStrictEqual(
+          [unfinished.status, unfinished.failure],
+          ["failed", "Proofroom stopped."],
+        )
+        assert.deepStrictEqual(
+          unfinished.chapters.map((chapter) => [chapter.key, chapter.status]),
+          [
+            ["discounts", "done"],
+            ["coupons", "failed"],
+          ],
+        )
+      }).pipe(Effect.provide(StorageLayer)),
   )
 
   it.effect("unknown guide id -> GuideNotFound, for the guide and for its hunks", () =>

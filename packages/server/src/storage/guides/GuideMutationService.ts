@@ -26,8 +26,9 @@ import { ChapterRow, ExcerptRow, FlagRow, GuideRow, HunkRow, PlacementRow } from
 // run has no sensible fallback, and callers shouldn't have to handle SqlError.
 
 export interface GuideMutations {
+  // The guide and its pull request's hunks, saved together: a guide is never
+  // there without the hunks it is about.
   readonly createGuide: (guide: NewGuide) => Effect.Effect<GuideId>
-  readonly saveHunks: (guideId: GuideId, hunks: ReadonlyArray<Hunk>) => Effect.Effect<void>
   readonly setGuideStatus: (
     guideId: GuideId,
     status: GuideStatus,
@@ -58,6 +59,12 @@ export interface GuideMutations {
     excerpt: Excerpt,
   ) => Effect.Effect<void>
   readonly addFlag: (guideId: GuideId, chapterKey: ChapterKey, flag: Flag) => Effect.Effect<void>
+  // Fails every guide still being planned or written whose writer process has
+  // stopped, and its unfinished chapters, with the reason.
+  readonly failAbandonedGuides: (
+    reason: string,
+    isWriterRunning: (writerPid: number) => boolean,
+  ) => Effect.Effect<void>
 }
 
 export interface NewGuide {
@@ -66,6 +73,9 @@ export interface NewGuide {
   readonly headSha: string
   readonly mergeBaseSha: string
   readonly cli: AgentCli
+  readonly hunks: ReadonlyArray<Hunk>
+  // The process that will write the guide.
+  readonly writerPid: number
 }
 
 export interface Overview {
@@ -107,7 +117,6 @@ function makeGuideMutationService() {
 
     return GuideMutationService.of({
       createGuide: (guide) => insertGuide(sql, guide).pipe(Effect.orDie),
-      saveHunks: (guideId, hunks) => insertHunks(sql, guideId, hunks).pipe(Effect.orDie),
       setGuideStatus: (guideId, status, failure) =>
         updateGuideStatus(sql, guideId, status, failure).pipe(thenAnnounce(guideId)),
       setOverview: (guideId, overview) =>
@@ -124,6 +133,8 @@ function makeGuideMutationService() {
         insertExcerpt(sql, guideId, chapterKey, excerpt).pipe(thenAnnounce(guideId)),
       addFlag: (guideId, chapterKey, flag) =>
         insertFlag(sql, guideId, chapterKey, flag).pipe(thenAnnounce(guideId)),
+      failAbandonedGuides: (reason, isWriterRunning) =>
+        failAbandoned(sql, reason, isWriterRunning).pipe(Effect.orDie),
     })
   })
 }
@@ -147,8 +158,14 @@ function insertGuide(sql: SqlClient.SqlClient, guide: NewGuide) {
       overviewDiagram: null,
       failure: null,
       createdAt: DateTime.formatIso(now),
+      writerPid: guide.writerPid,
     }
-    yield* sql`INSERT INTO guides ${sql.insert(encodeGuideRow(row))}`
+    yield* sql.withTransaction(
+      Effect.gen(function* () {
+        yield* sql`INSERT INTO guides ${sql.insert(encodeGuideRow(row))}`
+        yield* insertHunks(sql, row.id, guide.hunks)
+      }),
+    )
     return row.id
   })
 }
@@ -160,6 +177,32 @@ function updateGuideStatus(
   failure: string | null,
 ) {
   return sql`UPDATE guides SET status = ${status}, failure = ${failure} WHERE id = ${guideId}`
+}
+
+function failAbandoned(
+  sql: SqlClient.SqlClient,
+  reason: string,
+  isWriterRunning: (writerPid: number) => boolean,
+) {
+  return sql.withTransaction(
+    Effect.gen(function* () {
+      const unfinished = yield* sql<{ readonly id: string; readonly writerPid: number | null }>`
+        SELECT id, writerPid FROM guides WHERE status IN ('planning', 'writing')
+      `
+      const abandonedIds = unfinished
+        .filter(({ writerPid }) => writerPid === null || !isWriterRunning(writerPid))
+        .map(({ id }) => id)
+      if (abandonedIds.length === 0) return
+      yield* sql`
+        UPDATE chapters SET status = 'failed', failure = ${reason}
+        WHERE status IN ('waiting', 'writing') AND ${sql.in("guideId", abandonedIds)}
+      `
+      yield* sql`
+        UPDATE guides SET status = 'failed', failure = ${reason}
+        WHERE ${sql.in("id", abandonedIds)}
+      `
+    }),
+  )
 }
 
 function updateOverview(sql: SqlClient.SqlClient, guideId: GuideId, overview: Overview) {

@@ -101,4 +101,11 @@ const migrations = SqliteMigrator.fromRecord({
       )
     `
   }),
+  // The process writing a guide, so one starting up can tell a guide another
+  // process is still writing from one whose writer is gone. Null for guides
+  // from before it was recorded.
+  "0004_guide_writers": Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    yield* sql`ALTER TABLE guides ADD COLUMN writerPid INTEGER`
+  }),
 })
