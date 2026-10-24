@@ -11,6 +11,7 @@ import {
   composerNotes,
   draftNotes,
   flagNotes,
+  selectionFor,
   type CodeNote,
 } from "./code-notes.ts"
 import { FlagNote } from "./FlagNote.tsx"
@@ -58,6 +59,11 @@ export function CodeDiff({
           enableGutterUtility: true,
           onGutterUtilityClick: (selection) => openComposer(anchorForSelection(path, selection)),
         }}
+        // The diff keeps a clicked line selected, and while a line is selected
+        // it keeps its comment button there instead of following the pointer.
+        // So Proofroom says what is selected: the line being commented on
+        // while the box is open, nothing once it closes.
+        selectedLines={selectionFor(path, composerAnchor)}
         lineAnnotations={notes}
         renderAnnotation={(annotation) => (
           <CodeNoteView guideId={guideId} note={annotation.metadata} />
