@@ -10,7 +10,7 @@ import {
   type ShowCode,
   type WriteChapter,
 } from "@proofroom/protocol"
-import { Deferred, Effect } from "effect"
+import { Deferred, Effect, Semaphore } from "effect"
 import type { Tool } from "effect/ai"
 import { GuideMutationService } from "../../storage/guides/GuideMutationService.ts"
 import { GuideQueryService } from "../../storage/guides/GuideQueryService.ts"
@@ -29,6 +29,8 @@ export interface ChapterRun {
   readonly chapterFinished: Deferred.Deferred<void>
 }
 
+// Calls are handled one at a time, as the planner's are: two show_code calls
+// at once would both see room for one more excerpt.
 export function chapterToolHandlers(run: ChapterRun) {
   return ChapterToolkit.toLayer(
     Effect.gen(function* () {
@@ -38,11 +40,12 @@ export function chapterToolHandlers(run: ChapterRun) {
         queries: yield* GuideQueryService,
         mutations: yield* GuideMutationService,
       }
+      const oneAtATime = (yield* Semaphore.make(1)).withPermit
       return {
-        write_chapter: (parameters) => writeChapter(context, parameters),
-        show_code: (parameters) => showCode(context, parameters),
-        add_flag: (parameters) => addFlag(context, parameters),
-        finish_chapter: () => finishChapter(context),
+        write_chapter: (parameters) => oneAtATime(writeChapter(context, parameters)),
+        show_code: (parameters) => oneAtATime(showCode(context, parameters)),
+        add_flag: (parameters) => oneAtATime(addFlag(context, parameters)),
+        finish_chapter: () => oneAtATime(finishChapter(context)),
       }
     }),
   )

@@ -45,7 +45,7 @@ export function runChapter(input: ChapterInput) {
     const chapterFinished = yield* Deferred.make<void>()
     const toolServer = yield* serveChapterTools(input, placedHunks, chapterFinished)
 
-    const result = yield* runner
+    const agentExit = yield* runner
       .run({
         cli: input.cli,
         model: null,
@@ -61,14 +61,15 @@ export function runChapter(input: ChapterInput) {
               new ChapterFailed({ message: `Writing the chapter took over ${chapterTimeLimit}.` }),
             ),
         }),
+        Effect.exit,
       )
 
-    const isFinished = yield* Deferred.isDone(chapterFinished)
-    if (!isFinished) {
-      return yield* new ChapterFailed({
-        message: `The chapter run stopped before finishing. Its last message: ${result.finalMessage}`,
-      })
-    }
+    // A finished chapter stands, whatever the agent does after it.
+    if (yield* Deferred.isDone(chapterFinished)) return
+    const result = yield* agentExit
+    return yield* new ChapterFailed({
+      message: `The chapter run stopped before finishing. Its last message: ${result.finalMessage}`,
+    })
   }).pipe(
     Effect.scoped,
     Effect.catchTags({

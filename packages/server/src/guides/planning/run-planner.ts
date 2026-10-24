@@ -38,7 +38,7 @@ export function runPlanner(input: PlannerInput) {
     const planAccepted = yield* Deferred.make<void>()
     const toolServer = yield* servePlannerTools(input, planAccepted)
 
-    const result = yield* runner
+    const agentExit = yield* runner
       .run({
         cli: input.cli,
         model: null,
@@ -54,14 +54,16 @@ export function runPlanner(input: PlannerInput) {
               new PlanningFailed({ message: `The planner ran for over ${plannerTimeLimit}.` }),
             ),
         }),
+        Effect.exit,
       )
 
-    const isPlanAccepted = yield* Deferred.isDone(planAccepted)
-    if (!isPlanAccepted) {
-      return yield* new PlanningFailed({
-        message: `The planner stopped before its plan was complete. Its last message: ${result.finalMessage}`,
-      })
-    }
+    // An accepted plan stands, whatever the agent does after it: it may still
+    // run out of time or crash on its way out.
+    if (yield* Deferred.isDone(planAccepted)) return
+    const result = yield* agentExit
+    return yield* new PlanningFailed({
+      message: `The planner stopped before its plan was complete. Its last message: ${result.finalMessage}`,
+    })
   }).pipe(
     Effect.scoped,
     Effect.catchTags({

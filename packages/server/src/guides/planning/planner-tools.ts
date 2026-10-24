@@ -10,7 +10,7 @@ import {
   type ReadHunks,
   type SetOverview,
 } from "@proofroom/protocol"
-import { Deferred, Effect } from "effect"
+import { Deferred, Effect, Semaphore } from "effect"
 import type { Tool } from "effect/ai"
 import { GuideMutationService } from "../../storage/guides/GuideMutationService.ts"
 import { GuideQueryService } from "../../storage/guides/GuideQueryService.ts"
@@ -34,6 +34,10 @@ export interface PlannerRun {
   readonly planAccepted: Deferred.Deferred<void>
 }
 
+// Calls are handled one at a time, in the order they arrive. An agent can make
+// several at once, and each check reads the guide as the last call left it:
+// a place_hunks running alongside finish_plan could otherwise land after the
+// coverage check passed.
 export function plannerToolHandlers(run: PlannerRun) {
   return PlannerToolkit.toLayer(
     Effect.gen(function* () {
@@ -43,12 +47,13 @@ export function plannerToolHandlers(run: PlannerRun) {
         queries: yield* GuideQueryService,
         mutations: yield* GuideMutationService,
       }
+      const oneAtATime = (yield* Semaphore.make(1)).withPermit
       return {
-        read_hunks: (parameters) => readHunks(context, parameters),
-        set_overview: (parameters) => setOverview(context, parameters),
-        add_chapter: (parameters) => addChapter(context, parameters),
-        place_hunks: (parameters) => placeHunks(context, parameters),
-        finish_plan: () => finishPlan(context),
+        read_hunks: (parameters) => oneAtATime(readHunks(context, parameters)),
+        set_overview: (parameters) => oneAtATime(setOverview(context, parameters)),
+        add_chapter: (parameters) => oneAtATime(addChapter(context, parameters)),
+        place_hunks: (parameters) => oneAtATime(placeHunks(context, parameters)),
+        finish_plan: () => oneAtATime(finishPlan(context)),
       }
     }),
   )
@@ -74,6 +79,7 @@ function setOverview(
   { summary, diagram }: Tool.Parameters<typeof SetOverview>,
 ) {
   return Effect.gen(function* () {
+    yield* refuseChangesOnceAccepted(context)
     yield* checkDiagram(diagram)
     yield* context.mutations.setOverview(context.run.guideId, { summary, diagram })
     return "Overview saved."
@@ -85,6 +91,7 @@ function addChapter(
   { key, title, purpose }: Tool.Parameters<typeof AddChapter>,
 ) {
   return Effect.gen(function* () {
+    yield* refuseChangesOnceAccepted(context)
     const guide = yield* loadGuide(context)
     const keyTaken = guide.chapters.some((chapter) => chapter.key === key)
     if (keyTaken)
@@ -99,6 +106,7 @@ function addChapter(
 // the planner never has to work out which half of a batch went through.
 function placeHunks(context: PlannerContext, { placements }: Tool.Parameters<typeof PlaceHunks>) {
   return Effect.gen(function* () {
+    yield* refuseChangesOnceAccepted(context)
     const guide = yield* loadGuide(context)
     const chapterKeys = new Set(guide.chapters.map((chapter) => chapter.key))
     const problems = placements.flatMap((placement) =>
@@ -114,6 +122,7 @@ function placeHunks(context: PlannerContext, { placements }: Tool.Parameters<typ
 
 function finishPlan(context: PlannerContext) {
   return Effect.gen(function* () {
+    if (yield* Deferred.isDone(context.run.planAccepted)) return planAcceptedReply
     const guide = yield* loadGuide(context)
     if (guide.summary === null)
       return yield* new ToolRejected({ message: "Call set_overview first." })
@@ -122,11 +131,25 @@ function finishPlan(context: PlannerContext) {
     if (problems.length > 0) return yield* new ToolRejected({ message: planIncomplete(problems) })
 
     yield* Deferred.succeed(context.run.planAccepted, undefined)
-    return "Plan accepted: every changed line is placed. You are done; stop now."
+    return planAcceptedReply
   })
 }
 
+const planAcceptedReply = "Plan accepted: every changed line is placed. You are done; stop now."
+
 // --- checks --------------------------------------------------------------------------
+
+// The accepted plan is the one the chapters get written from, so it can't
+// change after finish_plan passed.
+function refuseChangesOnceAccepted(context: PlannerContext) {
+  return Effect.gen(function* () {
+    if (yield* Deferred.isDone(context.run.planAccepted)) {
+      return yield* new ToolRejected({
+        message: "The plan is accepted and can't change now. You are done; stop now.",
+      })
+    }
+  })
+}
 
 function findHunks(
   context: PlannerContext,

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, assert, beforeEach, describe, it } from "@effect/vitest"
-import type { GuideId } from "@proofroom/protocol"
+import { ChapterKey, type GuideId } from "@proofroom/protocol"
 import { Effect, Option, Ref, Stream } from "effect"
 import { AgentRunFailed } from "../src/agents/agent-run.ts"
 import { checkCoverage } from "../src/guides/coverage.ts"
@@ -255,5 +255,65 @@ describe("GuideGenerationService", realProcessesTimeout, () => {
           ],
         )
       }),
+  )
+
+  it.effect(
+    "planner changes its plan after it was accepted -> refused, the accepted plan kept",
+    () =>
+      Effect.gen(function* () {
+        const lateChange = yield* Ref.make<ToolReply | null>(null)
+        const secondThoughtsPlanner: AgentScript = (agent, run) =>
+          Effect.gen(function* () {
+            yield* completePlanner(agent, run)
+            const totalHunkId = hunkIdsByPath(run.prompt).get("src/cart/total.ts")
+            const reply = yield* agent.callTool("place_hunks", {
+              placements: [placeIn(totalHunkId, "coupons")],
+            })
+            yield* Ref.set(lateChange, reply)
+            return "Moved the totals into coupons."
+          })
+
+        const { guide, hunks } = yield* generateGuide({
+          planner: secondThoughtsPlanner,
+          chapter: chapterWriter,
+        })
+        const reply = yield* Ref.get(lateChange)
+        const totalHunk = hunks.find((hunk) => hunk.path === "src/cart/total.ts")
+        const totalPlacement = guide.placements.find(
+          (placement) => placement.hunkId === totalHunk?.id,
+        )
+
+        assert.isTrue(reply?.isError)
+        assert.include(reply?.text, "accepted and can't change")
+        assert.strictEqual(guide.status, "done")
+        assert.deepStrictEqual(totalPlacement?.target, {
+          _tag: "chapter",
+          chapterKey: ChapterKey.make("discounts"),
+        })
+      }),
+  )
+
+  it.effect("agents crash after finishing their work -> the guide is still written", () =>
+    Effect.gen(function* () {
+      const crashAfter =
+        (script: AgentScript): AgentScript =>
+        (agent, run) =>
+          script(agent, run).pipe(
+            Effect.andThen(
+              Effect.fail(new AgentRunFailed({ message: "claude exited with 1: socket hang up" })),
+            ),
+          )
+
+      const { guide } = yield* generateGuide({
+        planner: crashAfter(completePlanner),
+        chapter: crashAfter(chapterWriter),
+      })
+
+      assert.strictEqual(guide.status, "done")
+      assert.deepStrictEqual(
+        guide.chapters.map((chapter) => chapter.status),
+        ["done", "done"],
+      )
+    }),
   )
 })
