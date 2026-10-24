@@ -81,10 +81,12 @@ describe("AgentRunnerService", realProcessesTimeout, () => {
     "codex run -> the empty home folder (created first) and the account's Codex folder",
     () => {
       const standIn = StandInCli.create(join(workspace, "codex"), {
-        output: JSON.stringify({
-          type: "item.completed",
-          item: { type: "agent_message", text: "Chapter finished." },
-        }),
+        output: [
+          { type: "item.completed", item: { type: "agent_message", text: "Chapter finished." } },
+          { type: "turn.completed" },
+        ]
+          .map((event) => JSON.stringify(event))
+          .join("\n"),
       })
       return Effect.gen(function* () {
         const runner = yield* AgentRunnerService

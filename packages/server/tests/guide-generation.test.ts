@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, assert, beforeEach, describe, it } from "@effect/vitest"
-import type { GuideId } from "@proofroom/protocol"
-import { Effect, Option, Ref, Stream } from "effect"
+import { ChapterKey, type GuideId } from "@proofroom/protocol"
+import { Deferred, Effect, Option, Ref, Stream } from "effect"
 import { AgentRunFailed } from "../src/agents/agent-run.ts"
 import { checkCoverage } from "../src/guides/coverage.ts"
 import { GuideGenerationService } from "../src/guides/GuideGenerationService.ts"
@@ -25,6 +25,7 @@ import {
   overview,
   placeIn,
   roundingExcerpt,
+  roundingVisual,
 } from "./fixtures/scripted-agents.ts"
 import { makeTestServerLayer } from "./fixtures/test-server.ts"
 import { realProcessesTimeout } from "./fixtures/timeouts.ts"
@@ -87,6 +88,7 @@ describe("GuideGenerationService", realProcessesTimeout, () => {
           guide.chapters[0]?.excerpts.map(({ lines, why }) => ({ lines, why })),
           [roundingExcerpt],
         )
+        assert.deepStrictEqual(guide.chapters[0]?.visuals, [roundingVisual])
         assert.deepStrictEqual(checkCoverage(hunks, guide.placements), [])
       }),
   )
@@ -234,9 +236,7 @@ describe("GuideGenerationService", realProcessesTimeout, () => {
             yield* expectAccepted(showLines(5, 5))
             const fourth = yield* showLines(1, 5)
             yield* Ref.set(replies, [fromOtherChapter, fourth])
-            yield* expectAccepted(
-              agent.callTool("write_chapter", { body: "Discounts.", diagram: null }),
-            )
+            yield* expectAccepted(agent.callTool("write_chapter", { body: "Discounts." }))
             yield* expectAccepted(agent.callTool("finish_chapter", {}))
             return "Chapter finished."
           })
@@ -254,6 +254,259 @@ describe("GuideGenerationService", realProcessesTimeout, () => {
             { start: 5, end: 5 },
           ],
         )
+      }),
+  )
+
+  it.effect(
+    "planner changes its plan after it was accepted -> refused, the accepted plan kept",
+    () =>
+      Effect.gen(function* () {
+        const lateChange = yield* Ref.make<ToolReply | null>(null)
+        const secondThoughtsPlanner: AgentScript = (agent, run) =>
+          Effect.gen(function* () {
+            yield* completePlanner(agent, run)
+            const totalHunkId = hunkIdsByPath(run.prompt).get("src/cart/total.ts")
+            const reply = yield* agent.callTool("place_hunks", {
+              placements: [placeIn(totalHunkId, "coupons")],
+            })
+            yield* Ref.set(lateChange, reply)
+            return "Moved the totals into coupons."
+          })
+
+        const { guide, hunks } = yield* generateGuide({
+          planner: secondThoughtsPlanner,
+          chapter: chapterWriter,
+        })
+        const reply = yield* Ref.get(lateChange)
+        const totalHunk = hunks.find((hunk) => hunk.path === "src/cart/total.ts")
+        const totalPlacement = guide.placements.find(
+          (placement) => placement.hunkId === totalHunk?.id,
+        )
+
+        assert.isTrue(reply?.isError)
+        assert.include(reply?.text, "accepted and can't change")
+        assert.strictEqual(guide.status, "done")
+        assert.deepStrictEqual(totalPlacement?.target, {
+          _tag: "chapter",
+          chapterKey: ChapterKey.make("discounts"),
+        })
+      }),
+  )
+
+  it.effect("agents crash after finishing their work -> the guide is still written", () =>
+    Effect.gen(function* () {
+      const crashAfter =
+        (script: AgentScript): AgentScript =>
+        (agent, run) =>
+          script(agent, run).pipe(
+            Effect.andThen(
+              Effect.fail(new AgentRunFailed({ message: "claude exited with 1: socket hang up" })),
+            ),
+          )
+
+      const { guide } = yield* generateGuide({
+        planner: crashAfter(completePlanner),
+        chapter: crashAfter(chapterWriter),
+      })
+
+      assert.strictEqual(guide.status, "done")
+      assert.deepStrictEqual(
+        guide.chapters.map((chapter) => chapter.status),
+        ["done", "done"],
+      )
+    }),
+  )
+
+  it.effect("a hunk split between chapters -> flags and excerpts only on the chapter's part", () =>
+    Effect.gen(function* () {
+      const replies = yield* Ref.make<Array<ToolReply>>([])
+      // total.ts's hunk: lines 1-2 delete the old body, 3-5 add the new one,
+      // 6 is the closing brace. The rounded return (5) goes to coupons.
+      const splittingPlanner: AgentScript = (agent, run) =>
+        Effect.gen(function* () {
+          const hunkIds = hunkIdsByPath(run.prompt)
+          const totalHunkId = hunkIds.get("src/cart/total.ts")
+          yield* expectAccepted(agent.callTool("set_overview", overview))
+          yield* expectAccepted(agent.callTool("add_chapter", discountsChapter))
+          yield* expectAccepted(agent.callTool("add_chapter", couponsChapter))
+          const part = (start: number, end: number, chapterKey: string) => ({
+            ...placeIn(totalHunkId, chapterKey),
+            lines: { start, end },
+          })
+          yield* expectAccepted(
+            agent.callTool("place_hunks", {
+              placements: [
+                part(1, 4, "discounts"),
+                part(5, 6, "coupons"),
+                placeIn(hunkIds.get("src/cart/coupons.ts"), "coupons"),
+              ],
+            }),
+          )
+          yield* expectAccepted(agent.callTool("finish_plan", {}))
+          return "Plan accepted."
+        })
+      const discountsWriter: AgentScript = (agent, run) =>
+        Effect.gen(function* () {
+          if (chapterTitleIn(run.prompt) !== discountsChapter.title)
+            return yield* chapterWriter(agent, run)
+          const totalHunkId = hunkIdsByPath(run.prompt).get("src/cart/total.ts")
+          yield* expectAccepted(agent.callTool("write_chapter", { body: "Discounts." }))
+          const flagOnCoupons = yield* agent.callTool("add_flag", {
+            hunkId: totalHunkId,
+            line: 5,
+            kind: "hidden-behaviour-change",
+            note: "Rounded now.",
+          })
+          const excerptOfCoupons = yield* agent.callTool("show_code", {
+            hunkId: totalHunkId,
+            lines: { start: 5, end: 6 },
+            why: "The rounding.",
+          })
+          yield* Ref.set(replies, [flagOnCoupons, excerptOfCoupons])
+          yield* expectAccepted(
+            agent.callTool("show_code", {
+              hunkId: totalHunkId,
+              lines: { start: 3, end: 5 },
+              why: "The new signature, and the return it feeds.",
+            }),
+          )
+          yield* expectAccepted(agent.callTool("finish_chapter", {}))
+          return "Chapter finished."
+        })
+
+      const { guide } = yield* generateGuide({
+        planner: splittingPlanner,
+        chapter: discountsWriter,
+      })
+      const [flagOnCoupons, excerptOfCoupons] = yield* Ref.get(replies)
+
+      assert.include(flagOnCoupons?.text, "belongs to another chapter. This chapter has lines 1-4")
+      assert.include(excerptOfCoupons?.text, "show none of this chapter's changes")
+      assert.deepStrictEqual(guide.chapters[0]?.flags, [])
+      assert.deepStrictEqual(
+        guide.chapters[0]?.excerpts.map((excerpt) => excerpt.lines),
+        [{ start: 3, end: 5 }],
+      )
+    }),
+  )
+
+  it.effect("chapter run stops without finish_chapter -> that chapter fails, saying why", () =>
+    Effect.gen(function* () {
+      const quittingWriter: AgentScript = (agent, run) =>
+        chapterTitleIn(run.prompt) === couponsChapter.title
+          ? agent
+              .callTool("write_chapter", { body: "Coupons." })
+              .pipe(Effect.as("Written, I think."))
+          : chapterWriter(agent, run)
+
+      const { guide } = yield* generateGuide({ planner: completePlanner, chapter: quittingWriter })
+      const coupons = guide.chapters.find((chapter) => chapter.key === "coupons")
+
+      assert.strictEqual(guide.status, "done")
+      assert.strictEqual(coupons?.status, "failed")
+      assert.include(coupons?.failure, "stopped before finishing")
+      assert.include(coupons?.failure, "Written, I think.")
+    }),
+  )
+
+  it.effect("app shuts down while a guide is being written -> its agent is stopped", () =>
+    Effect.gen(function* () {
+      const plannerStarted = yield* Deferred.make<void>()
+      const plannerStopped = yield* Deferred.make<void>()
+      const endlessPlanner: AgentScript = () =>
+        Deferred.succeed(plannerStarted, undefined).pipe(
+          Effect.andThen(Effect.never),
+          Effect.onInterrupt(() => Deferred.succeed(plannerStopped, undefined)),
+        )
+
+      // The layer, and so the app, shuts down when this inner effect ends.
+      yield* Effect.gen(function* () {
+        const generation = yield* GuideGenerationService
+        yield* generation.start(pullRequestUrl, "claude")
+        yield* Deferred.await(plannerStarted)
+      }).pipe(
+        Effect.provide(
+          makeTestServerLayer(workspace, { planner: endlessPlanner, chapter: chapterWriter }),
+        ),
+      )
+
+      assert.isTrue(yield* Deferred.isDone(plannerStopped))
+    }),
+  )
+
+  it.effect("guide deleted while being written -> its agent is stopped and the guide is gone", () =>
+    Effect.gen(function* () {
+      const plannerStarted = yield* Deferred.make<void>()
+      const plannerStopped = yield* Deferred.make<void>()
+      const endlessPlanner: AgentScript = () =>
+        Deferred.succeed(plannerStarted, undefined).pipe(
+          Effect.andThen(Effect.never),
+          Effect.onInterrupt(() => Deferred.succeed(plannerStopped, undefined)),
+        )
+
+      yield* Effect.gen(function* () {
+        const generation = yield* GuideGenerationService
+        const queries = yield* GuideQueryService
+        const guideId = yield* generation.start(pullRequestUrl, "claude")
+        yield* Deferred.await(plannerStarted)
+
+        yield* generation.delete(guideId)
+
+        assert.isTrue(yield* Deferred.isDone(plannerStopped))
+        assert.deepStrictEqual(yield* queries.listGuides, [])
+      }).pipe(
+        Effect.provide(
+          makeTestServerLayer(workspace, { planner: endlessPlanner, chapter: chapterWriter }),
+        ),
+      )
+    }),
+  )
+
+  it.effect(
+    "chapter text over 150 words, a broken flow, a fourth visual -> each refused, saying what to fix",
+    () =>
+      Effect.gen(function* () {
+        const replies = yield* Ref.make<Array<ToolReply>>([])
+        const wordyWriter: AgentScript = (agent, run) =>
+          Effect.gen(function* () {
+            if (chapterTitleIn(run.prompt) !== discountsChapter.title)
+              return yield* chapterWriter(agent, run)
+            const longText = yield* agent.callTool("write_chapter", {
+              body: Array.from({ length: 151 }, () => "word").join(" "),
+            })
+            const brokenFlow = yield* agent.callTool("add_visual", {
+              visual: {
+                _tag: "flow",
+                title: "Where totals come from",
+                direction: "across",
+                nodes: [
+                  { id: "cart", label: "Cart", change: "unchanged", path: null },
+                  { id: "total", label: "cartTotal", change: "changed", path: "src/elsewhere.ts" },
+                ],
+                edges: [{ from: "cart", to: "checkout", label: null, change: "added" }],
+              },
+            })
+            for (const _ of [1, 2, 3]) {
+              yield* expectAccepted(agent.callTool("add_visual", { visual: roundingVisual }))
+            }
+            const fourthVisual = yield* agent.callTool("add_visual", { visual: roundingVisual })
+            yield* Ref.set(replies, [longText, brokenFlow, fourthVisual])
+            yield* expectAccepted(agent.callTool("write_chapter", { body: "Discounts." }))
+            yield* expectAccepted(agent.callTool("finish_chapter", {}))
+            return "Chapter finished."
+          })
+
+        const { guide } = yield* generateGuide({ planner: completePlanner, chapter: wordyWriter })
+        const [longText, brokenFlow, fourthVisual] = yield* Ref.get(replies)
+
+        assert.include(longText?.text, "151 words; keep it to 150")
+        assert.include(brokenFlow?.text, 'names "checkout", which is not one of the nodes')
+        assert.include(
+          brokenFlow?.text,
+          "src/elsewhere.ts, which isn't one of this chapter's files",
+        )
+        assert.include(fourthVisual?.text, "already has 3 visuals")
+        assert.strictEqual(guide.chapters[0]?.visuals.length, 3)
       }),
   )
 })

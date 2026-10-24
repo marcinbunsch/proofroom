@@ -30,18 +30,14 @@ describe("claudeCommand", () => {
     assert.include(command.args, "--strict-mcp-config")
   })
 
-  it("permissions -> the run's tools and read-only commands allowed, everything else refused unasked", () => {
+  it("permissions -> the run's tools allowed, no shell, everything else refused unasked", () => {
     assert.includeMembers(
       [...command.args],
-      [
-        "mcp__proofroom__set_overview",
-        "mcp__proofroom__add_chapter",
-        "Bash(git log:*)",
-        "Bash(git blame:*)",
-      ],
+      ["mcp__proofroom__set_overview", "mcp__proofroom__add_chapter"],
     )
     assert.notInclude(command.args, "Write")
-    assert.strictEqual(valueAfter(command.args, "--tools"), "Read,Grep,Glob,Bash")
+    assert.isFalse(command.args.some((arg) => arg.startsWith("Bash")))
+    assert.strictEqual(valueAfter(command.args, "--tools"), "Read,Grep,Glob")
     assert.strictEqual(valueAfter(command.args, "--permission-mode"), "dontAsk")
     assert.strictEqual(valueAfter(command.args, "--permission-prompts"), "none")
     assert.strictEqual(valueAfter(command.args, "--setting-sources"), "")
@@ -167,6 +163,35 @@ describe("readCodexResult", () => {
           new AgentRunFailed({ message: "Codex stopped with an error: stream disconnected" }),
         ),
       )
+    }),
+  )
+
+  // Regression: any error event failed the run, even one Codex recovered from.
+  it.effect("an error Codex recovered from, and a stray line -> the run still succeeds", () =>
+    Effect.gen(function* () {
+      const result = yield* readCodexResult(
+        [
+          events({ type: "thread.started" }),
+          "warning: proceeding, even though we could not update PATH",
+          events(
+            { type: "error", message: "Reconnecting... 1/5" },
+            { type: "item.completed", item: { type: "agent_message", text: "Plan accepted." } },
+            { type: "turn.completed", usage: { input_tokens: 57125 } },
+          ),
+        ].join("\n"),
+      )
+      assert.deepStrictEqual(result, { finalMessage: "Plan accepted.", costUsd: null })
+    }),
+  )
+
+  it.effect("output ends before the turn does -> AgentRunFailed with the last error", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        readCodexResult(
+          events({ type: "thread.started" }, { type: "error", message: "Reconnecting... 5/5" }),
+        ),
+      )
+      assert.strictEqual(error.message, "Codex stopped with an error: Reconnecting... 5/5")
     }),
   )
 })

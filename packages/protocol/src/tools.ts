@@ -1,7 +1,8 @@
 import { Schema } from "effect"
 import { Tool, Toolkit } from "effect/ai"
-import { ChapterKey, FlagKind, MermaidDiagram, Placement } from "./guide.ts"
+import { ChapterKey, FlagKind, Placement } from "./guide.ts"
 import { HunkId, HunkLineRange } from "./hunk.ts"
+import { MermaidDiagram, Visual } from "./visuals.ts"
 
 // The tools a CLI agent uses to hand a guide back to Proofroom, over MCP. Every
 // call is checked against its schema before the handler runs. A handler that
@@ -81,11 +82,22 @@ export const PlannerToolkit = Toolkit.make(
 
 export const WriteChapter = Tool.make("write_chapter", {
   description:
-    "Write this chapter: a short explanation in Markdown, and optionally one Mermaid diagram. A second call replaces the first.",
-  parameters: Schema.Struct({
-    body: Schema.String,
-    diagram: Schema.NullOr(MermaidDiagram),
-  }),
+    "Write this chapter's text: a short explanation in Markdown, at most 150 words. Say what changed and why it matters; leave the structure (cases, signatures, flows) to add_visual. A second call replaces the first.",
+  parameters: Schema.Struct({ body: Schema.String }),
+  success: Confirmation,
+  failure: ToolRejected,
+})
+
+export const AddVisual = Tool.make("add_visual", {
+  description: [
+    "Add a visual to this chapter; Proofroom draws it from the data you give. Up to 3 per chapter, shown in the order added. Pick the kind that fits:",
+    "- behaviourChange: cases where the code now behaves differently, each with the situation, what happened before and what happens now. Best for hidden behaviour changes. 1 to 8 cases.",
+    "- apiChange: signatures, endpoints, config keys or types callers see, each as before and after (before null if added, after null if removed), with an optional note on what callers must do. 1 to 12 entries.",
+    "- flow: a path through the code (a request, an event, the data) with each node and edge marked added, changed, removed or unchanged. Give a node the file it lives in as `path` (one of this chapter's files) so the reader can open it. 2 to 15 nodes; edges name nodes by your ids.",
+    "- diagram: free Mermaid with a caption, only when none of the above fits.",
+    "Keep labels short: a few words or one signature.",
+  ].join("\n"),
+  parameters: Schema.Struct({ visual: Visual }),
   success: Confirmation,
   failure: ToolRejected,
 })
@@ -122,4 +134,57 @@ export const FinishChapter = Tool.make("finish_chapter", {
   failure: ToolRejected,
 })
 
-export const ChapterToolkit = Toolkit.make(WriteChapter, ShowCode, AddFlag, FinishChapter)
+export const ChapterToolkit = Toolkit.make(
+  WriteChapter,
+  AddVisual,
+  ShowCode,
+  AddFlag,
+  FinishChapter,
+)
+
+// --- both runs: the code's history ----------------------------------------------
+
+// What a run may learn from git about why the code is the way it is. These are
+// tools rather than shell commands because a shell allow-list can't be made
+// read-only: `git log --output=<file>` writes any file, `rg --pre` runs any
+// program. Here Proofroom runs git itself, with arguments it chose.
+
+// A commit hash as git_log prints it, never an option or a revision
+// expression.
+const CommitHash = Schema.String.check(Schema.isPattern(/^[0-9a-f]{7,40}$/))
+
+export const GitLog = Tool.make("git_log", {
+  description:
+    "The latest commits that changed a file, newest first: short hash, date, author and subject. Use it to learn why code is the way it is.",
+  parameters: Schema.Struct({
+    path: Schema.String,
+    maxCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(30)),
+  }),
+  success: Schema.String,
+  failure: ToolRejected,
+})
+
+export const GitShow = Tool.make("git_show", {
+  description:
+    "One commit by its hash: its full message and its changes, to one file if `path` is set or to every file if it is null.",
+  parameters: Schema.Struct({
+    commit: CommitHash,
+    path: Schema.NullOr(Schema.String),
+  }),
+  success: Schema.String,
+  failure: ToolRejected,
+})
+
+export const GitBlame = Tool.make("git_blame", {
+  description:
+    "Which commit last changed each line of a file, for a range of lines in the pull request's latest commit (line numbers in the file, not hunk-local ones).",
+  parameters: Schema.Struct({
+    path: Schema.String,
+    firstLine: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+    lastLine: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+  }),
+  success: Schema.String,
+  failure: ToolRejected,
+})
+
+export const HistoryToolkit = Toolkit.make(GitLog, GitShow, GitBlame)

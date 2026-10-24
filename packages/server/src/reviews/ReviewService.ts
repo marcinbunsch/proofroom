@@ -69,7 +69,9 @@ function makeReviewService() {
           .pipe(Effect.mapError((error) => new SubmitFailed({ message: error.message })))
 
         // Only after GitHub has the review: a failed submit keeps every draft.
-        yield* draftMutations.deleteDraftsOfGuide(guideId)
+        // Drafts written or edited while it was being sent aren't on GitHub,
+        // so they stay.
+        yield* draftMutations.deleteSentDrafts(comments)
         yield* Effect.logInfo("review submitted", { guideId, verdict, comments: comments.length })
         return reviewUrl
       })

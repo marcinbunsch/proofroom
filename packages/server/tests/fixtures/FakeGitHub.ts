@@ -15,6 +15,8 @@ export interface SubmittedReview {
 
 export class FakeGitHub {
   readonly submittedReviews: Array<SubmittedReview> = []
+  // Runs while a review is being sent, as the user might keep writing then.
+  whileSubmitting: Effect.Effect<void> = Effect.void
 
   // `refuseReviewsWith`: the message gh would fail with, e.g. GitHub refusing
   // an approval of your own pull request.
@@ -33,9 +35,11 @@ export class FakeGitHub {
   private submitReview(pullRequest: PullRequestRef, review: ReviewToSubmit) {
     const refusal = this.options.refuseReviewsWith
     if (refusal !== undefined) return Effect.fail(new GitHubFailed({ message: refusal }))
-    return Effect.sync(() => {
-      this.submittedReviews.push({ pullRequest, review })
-      return `https://github.com/acme/checkout/pull/482#pullrequestreview-${this.submittedReviews.length}`
-    })
+    return this.whileSubmitting.pipe(
+      Effect.map(() => {
+        this.submittedReviews.push({ pullRequest, review })
+        return `https://github.com/acme/checkout/pull/482#pullrequestreview-${this.submittedReviews.length}`
+      }),
+    )
   }
 }

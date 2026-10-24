@@ -1,7 +1,8 @@
 import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react"
 import type { Guide, GuideId, Hunk } from "@proofroom/protocol"
+import { Exit } from "effect"
 import { AsyncResult } from "effect/reactivity"
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { AgentText } from "../components/AgentText.tsx"
 import { MermaidDiagram } from "../components/MermaidDiagram.tsx"
 import { StatusBadge } from "../components/StatusBadge.tsx"
@@ -9,7 +10,15 @@ import { ReviewBar } from "../reviews/ReviewBar.tsx"
 import { ChapterView } from "./ChapterView.tsx"
 import { DiffView } from "./DiffView.tsx"
 import { RoutineChanges } from "./RoutineChanges.tsx"
-import { guideAtom, guideListAtom, guideTabAtom, hunksAtom, type GuideTab } from "./guide-atoms.ts"
+import {
+  deleteGuideAtom,
+  guideAtom,
+  guideListAtom,
+  guideTabAtom,
+  hunksAtom,
+  selectedGuideIdAtom,
+  type GuideTab,
+} from "./guide-atoms.ts"
 
 // A guide, read top to bottom, or its whole diff on the Diff tab. It fills in
 // while the guide is written.
@@ -58,6 +67,7 @@ function GuideHeader({ guide }: { readonly guide: Guide }) {
           {owner}/{repo}#{number}
         </a>
         <StatusBadge status={guide.status} />
+        <DeleteGuideButton guide={guide} />
       </div>
       <h1 className="mt-2 text-3xl font-semibold tracking-tight">{guide.title}</h1>
       {guide.failure !== null && (
@@ -67,6 +77,44 @@ function GuideHeader({ guide }: { readonly guide: Guide }) {
       )}
     </header>
   )
+}
+
+// Deletes the guide and its unsent drafts, after asking. A guide still being
+// written stops. Nothing on GitHub changes.
+function DeleteGuideButton({ guide }: { readonly guide: Guide }) {
+  const deleteGuide = useAtomSet(deleteGuideAtom, { mode: "promiseExit" })
+  const selectGuide = useAtomSet(selectedGuideIdAtom)
+  const [isDeleting, setIsDeleting] = useState(false)
+
+  const onClick = async () => {
+    if (!window.confirm(deleteQuestion(guide))) return
+    setIsDeleting(true)
+    const exit = await deleteGuide({ payload: { guideId: guide.id }, reactivityKeys: ["guides"] })
+    setIsDeleting(false)
+    if (Exit.isSuccess(exit)) selectGuide(null)
+  }
+
+  return (
+    <button
+      className="ml-auto text-sm text-stone-500 hover:text-red-700 disabled:opacity-40"
+      data-testid="delete-guide"
+      disabled={isDeleting}
+      onClick={onClick}
+    >
+      Delete guide
+    </button>
+  )
+}
+
+function deleteQuestion(guide: Guide): string {
+  const isBeingWritten = guide.status === "planning" || guide.status === "writing"
+  return [
+    "Delete this guide?",
+    isBeingWritten ? "It is still being written; that stops." : null,
+    "Draft comments you haven't sent go with it. Nothing on GitHub changes.",
+  ]
+    .filter((line) => line !== null)
+    .join(" ")
 }
 
 function GuideTabs() {

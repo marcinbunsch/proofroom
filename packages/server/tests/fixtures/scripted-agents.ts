@@ -23,6 +23,13 @@ export const roundingExcerpt = {
   why: "The total is now rounded after the discount, so results change by up to half a cent.",
 }
 
+// What the discounts chapter shows of the rounding: one case, before and after.
+export const roundingVisual = {
+  _tag: "behaviourChange",
+  title: "Totals with a discount",
+  cases: [{ situation: "$10.01 at 50% off", before: "500.5 cents", after: "501 cents" }],
+} as const
+
 export const overview = {
   summary: "Cart totals can now take a percentage discount. A first coupon code uses it.",
   diagram: {
@@ -55,16 +62,17 @@ export const completePlanner: AgentScript = (agent, run) =>
     return "Plan accepted."
   })
 
-// A chapter writer that writes its chapter, flags the rounding change in the
-// discounts chapter, and finishes.
+// A chapter writer that writes its chapter and, in the discounts chapter, shows
+// the rounding change, flags it, and finishes.
 export const chapterWriter: AgentScript = (agent, run) =>
   Effect.gen(function* () {
     const title = chapterTitleIn(run.prompt)
     yield* expectAccepted(
-      agent.callTool("write_chapter", { body: `How ${title.toLowerCase()} work.`, diagram: null }),
+      agent.callTool("write_chapter", { body: `How ${title.toLowerCase()} work.` }),
     )
     if (title === discountsChapter.title) {
       const totalHunkId = hunkIdsByPath(run.prompt).get("src/cart/total.ts")
+      yield* expectAccepted(agent.callTool("add_visual", { visual: roundingVisual }))
       yield* expectAccepted(
         agent.callTool("show_code", { hunkId: totalHunkId, ...roundingExcerpt }),
       )

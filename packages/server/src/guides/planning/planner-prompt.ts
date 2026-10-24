@@ -8,7 +8,7 @@ import { hunkSummaryLine } from "../hunk-text.ts"
 export function plannerPrompt(pullRequest: LoadedPullRequest): string {
   return `You are planning a guide to a GitHub pull request. A reviewer will read your guide instead of reading every line of the diff, so it has to be accurate, complete and easy to follow.
 
-You are in a checkout of the pull request's latest commit. Read any file you need to understand the change: the code around a hunk, its callers, its tests. You can run git log, git show, git blame and git grep. You cannot change anything.
+You are in a checkout of the pull request's latest commit. Read any file you need to understand the change: the code around a hunk, its callers, its tests. To learn why code is the way it is, use git_log, git_show and git_blame. You cannot change anything.
 
 # The pull request
 

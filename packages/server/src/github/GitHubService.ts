@@ -1,7 +1,7 @@
 import type { CommentAnchor, PullRequestRef, ReviewVerdict } from "@proofroom/protocol"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Option, Schema, type PlatformError } from "effect"
 import { ChildProcessSpawner } from "effect/process"
-import { runCommand } from "../process/run-command.ts"
+import { runCommand, type CommandFailed } from "../process/run-command.ts"
 
 // Everything Proofroom asks GitHub, through the `gh` command-line tool, so it
 // never holds a token.
@@ -53,28 +53,24 @@ function makeGitHubService() {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 
     const fetchPullRequest = (pullRequest: PullRequestRef) =>
-      runCommand(spawner, {
-        executable: "gh",
-        args: [
-          "pr",
-          "view",
-          String(pullRequest.number),
-          "--repo",
-          `${pullRequest.owner}/${pullRequest.repo}`,
-          "--json",
-          "title,body,baseRefName,commits",
-        ],
-      }).pipe(
-        Effect.flatMap(decodePullRequestDetails),
-        Effect.mapError((error) => new GitHubFailed({ message: error.message })),
-      )
+      runGh(spawner, [
+        "pr",
+        "view",
+        String(pullRequest.number),
+        "--repo",
+        `${pullRequest.owner}/${pullRequest.repo}`,
+        "--json",
+        "title,body,baseRefName,commits",
+      ]).pipe(Effect.flatMap(decodeGhOutput(PullRequestDetails)))
 
     // The review goes in as JSON on stdin: a big review's comments could exceed
-    // the limit on command-line arguments.
+    // the limit on command-line arguments. A refused review is logged with
+    // what was sent, since GitHub's reason usually points into it, e.g. a
+    // comment on a line that isn't in the diff.
     const submitReview = (pullRequest: PullRequestRef, review: ReviewToSubmit) =>
-      runCommand(spawner, {
-        executable: "gh",
-        args: [
+      runGh(
+        spawner,
+        [
           "api",
           "--method",
           "POST",
@@ -82,21 +78,22 @@ function makeGitHubService() {
           "--input",
           "-",
         ],
-        stdin: JSON.stringify(reviewRequestBody(review)),
-      }).pipe(
-        Effect.flatMap(decodeSubmittedReview),
+        JSON.stringify(reviewRequestBody(review)),
+      ).pipe(
+        Effect.tapError((error) =>
+          Effect.logError("GitHub refused a review", {
+            reason: error.message,
+            pullRequest,
+            review: reviewRequestBody(review),
+          }),
+        ),
+        Effect.flatMap(decodeGhOutput(SubmittedReview)),
         Effect.map((submitted) => submitted.html_url),
-        Effect.mapError((error) => new GitHubFailed({ message: error.message })),
       )
 
     return GitHubService.of({ fetchPullRequest, submitReview })
   })
 }
-
-// gh prints more fields per commit than these; the extra ones are ignored.
-const decodePullRequestDetails = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(PullRequestDetails),
-)
 
 // --- reviews -------------------------------------------------------------------------
 
@@ -123,6 +120,63 @@ const githubEvents: Record<ReviewVerdict, string> = {
 }
 
 // GitHub answers with the whole review; only its address is needed.
-const decodeSubmittedReview = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(Schema.Struct({ html_url: Schema.String })),
-)
+const SubmittedReview = Schema.Struct({ html_url: Schema.String })
+
+// --- gh ------------------------------------------------------------------------------
+
+// Runs gh, failing with GitHub's own reason when it refuses.
+function runGh(
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  args: ReadonlyArray<string>,
+  stdin?: string,
+) {
+  return runCommand(spawner, { executable: "gh", args, stdin }).pipe(
+    Effect.mapError((error) => new GitHubFailed({ message: githubReason(error) })),
+  )
+}
+
+// gh prints JSON; fields beyond the schema's are ignored.
+function decodeGhOutput<A>(schema: Schema.Codec<A>) {
+  return (output: string) =>
+    Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(output).pipe(
+      Effect.mapError(
+        (error) =>
+          new GitHubFailed({ message: `gh printed something unexpected: ${error.message}` }),
+      ),
+    )
+}
+
+// Why GitHub refused a call, in its own words. `gh api` prints GitHub's error
+// response on stdout, e.g. {"message": "Unprocessable Entity", "errors":
+// ["Review Can not approve your own pull request"]}, and only "HTTP 422" on
+// stderr. Falls back to stderr when there is no response to read.
+export function githubReason(error: CommandFailed | PlatformError.PlatformError): string {
+  if (error._tag !== "CommandFailed") return error.message
+  const response = Schema.decodeUnknownOption(Schema.fromJsonString(GitHubErrorResponse))(
+    error.stdout,
+  )
+  if (Option.isNone(response)) return error.message
+  const { message, errors = [] } = response.value
+  const details = errors.map((detail) =>
+    typeof detail === "string"
+      ? detail
+      : (detail.message ?? [detail.field, detail.code].filter(Boolean).join(" ")),
+  )
+  return details.length === 0 ? message : `${message}: ${details.join("; ")}`
+}
+
+const GitHubErrorResponse = Schema.Struct({
+  message: Schema.String,
+  errors: Schema.optional(
+    Schema.Array(
+      Schema.Union([
+        Schema.String,
+        Schema.Struct({
+          message: Schema.optional(Schema.String),
+          field: Schema.optional(Schema.String),
+          code: Schema.optional(Schema.String),
+        }),
+      ]),
+    ),
+  ),
+})

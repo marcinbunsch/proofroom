@@ -1,10 +1,12 @@
 import { assert, describe, it } from "@effect/vitest"
 import { ChapterKey, GuideId, GuideNotFound, HunkId, type Hunk } from "@proofroom/protocol"
-import { Deferred, Effect, Exit, Fiber, Stream } from "effect"
+import { Deferred, Effect, Exit, Fiber, Ref, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { GuideQueryService } from "../src/storage/guides/GuideQueryService.ts"
 import { GuideSubscriptionService } from "../src/storage/guides/GuideSubscriptionService.ts"
 import { GuideMutationService, type NewGuide } from "../src/storage/guides/GuideMutationService.ts"
+import { DraftMutationService } from "../src/storage/reviews/DraftMutationService.ts"
+import { DraftQueryService } from "../src/storage/reviews/DraftQueryService.ts"
 import { makeStorageLayer } from "../src/storage/StorageLayer.ts"
 
 // The app's own storage wiring, on an in-memory database. The layer is built
@@ -17,6 +19,8 @@ const discountGuide: NewGuide = {
   headSha: "9f3c1e2a7b4d5c6e8f0a1b2c3d4e5f6a7b8c9d0e",
   mergeBaseSha: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
   cli: "claude",
+  hunks: [],
+  writerPid: process.pid,
 }
 
 const signatureHunk: Hunk = {
@@ -186,73 +190,173 @@ describe("guide storage", () => {
     }).pipe(Effect.provide(StorageLayer)),
   )
 
-  it.effect("chapter written, flagged and excerpted -> all of it under that chapter only", () =>
+  it.effect(
+    "chapter written, with visuals, flags and excerpts -> all of it under that chapter only",
+    () =>
+      Effect.gen(function* () {
+        const mutations = yield* GuideMutationService
+        const queries = yield* GuideQueryService
+        const guideId = yield* mutations.createGuide(discountGuide)
+        yield* mutations.addChapter(guideId, {
+          key: discountsChapter,
+          title: "Discounts",
+          purpose: "cartTotal takes a percentage",
+        })
+        yield* mutations.addChapter(guideId, {
+          key: couponsChapter,
+          title: "Coupons",
+          purpose: "A first coupon code",
+        })
+
+        const diagram = {
+          _tag: "diagram",
+          source: "flowchart LR\n  Items --> Sum --> Discount --> Round",
+          caption: "How a total is computed",
+        } as const
+        const rounding = {
+          _tag: "behaviourChange",
+          title: "Totals with a discount",
+          cases: [{ situation: "$10.01 at 50% off", before: "500.5 cents", after: "501 cents" }],
+        } as const
+        yield* mutations.writeChapter(guideId, discountsChapter, {
+          body: "The total now rounds after discounting.",
+        })
+        yield* mutations.addVisual(guideId, discountsChapter, diagram)
+        yield* mutations.addVisual(guideId, discountsChapter, rounding)
+        yield* mutations.addFlag(guideId, discountsChapter, {
+          hunkId: signatureHunk.id,
+          line: 2,
+          kind: "hidden-behaviour-change",
+          note: "Rounding moved: totals for existing callers can change by a cent.",
+        })
+        yield* mutations.addExcerpt(guideId, discountsChapter, {
+          hunkId: signatureHunk.id,
+          lines: { start: 1, end: 2 },
+          why: "The signature gains a discount, with 0 as the default.",
+        })
+        yield* mutations.setChapterStatus(guideId, discountsChapter, "done", null)
+        const [discounts, coupons] = (yield* queries.loadGuide(guideId)).chapters
+
+        assert.strictEqual(discounts?.status, "done")
+        assert.strictEqual(discounts?.body, "The total now rounds after discounting.")
+        assert.deepStrictEqual(discounts?.visuals, [diagram, rounding])
+        assert.deepStrictEqual(
+          discounts?.flags.map((flag) => [flag.hunkId, flag.line, flag.kind]),
+          [[signatureHunk.id, 2, "hidden-behaviour-change"]],
+        )
+        assert.deepStrictEqual(discounts?.excerpts, [
+          {
+            hunkId: signatureHunk.id,
+            lines: { start: 1, end: 2 },
+            why: "The signature gains a discount, with 0 as the default.",
+          },
+        ])
+        assert.deepStrictEqual(coupons?.flags, [])
+        assert.deepStrictEqual(coupons?.visuals, [])
+        assert.deepStrictEqual(coupons?.excerpts, [])
+      }).pipe(Effect.provide(StorageLayer)),
+  )
+
+  it.effect("guide created with its hunks -> hunks loaded back in diff order", () =>
     Effect.gen(function* () {
       const mutations = yield* GuideMutationService
       const queries = yield* GuideQueryService
-      const guideId = yield* mutations.createGuide(discountGuide)
-      yield* mutations.addChapter(guideId, {
+
+      const guideId = yield* mutations.createGuide({
+        ...discountGuide,
+        hunks: [signatureHunk, couponHunk],
+      })
+      const hunks = yield* queries.loadHunks(guideId)
+
+      assert.deepStrictEqual(hunks, [signatureHunk, couponHunk])
+    }).pipe(Effect.provide(StorageLayer)),
+  )
+
+  it.effect(
+    "abandoned guides failed -> they and their unfinished chapters fail; finished guides, and ones still being written, untouched",
+    () =>
+      Effect.gen(function* () {
+        const mutations = yield* GuideMutationService
+        const queries = yield* GuideQueryService
+        const stoppedWriter = 4101
+        const runningWriter = 4102
+        const finishedId = yield* mutations.createGuide({
+          ...discountGuide,
+          writerPid: stoppedWriter,
+        })
+        yield* mutations.setGuideStatus(finishedId, "done", null)
+        const stillWrittenId = yield* mutations.createGuide({
+          ...discountGuide,
+          writerPid: runningWriter,
+        })
+        const unfinishedId = yield* mutations.createGuide({
+          ...discountGuide,
+          writerPid: stoppedWriter,
+        })
+        yield* mutations.addChapter(unfinishedId, {
+          key: discountsChapter,
+          title: "Discounts",
+          purpose: "cartTotal takes a percentage",
+        })
+        yield* mutations.addChapter(unfinishedId, {
+          key: couponsChapter,
+          title: "Coupons",
+          purpose: "A first coupon code",
+        })
+        yield* mutations.setChapterStatus(unfinishedId, discountsChapter, "done", null)
+        yield* mutations.setGuideStatus(unfinishedId, "writing", null)
+
+        yield* mutations.failAbandonedGuides("Proofroom stopped.", (pid) => pid === runningWriter)
+        const finished = yield* queries.loadGuide(finishedId)
+        const stillWritten = yield* queries.loadGuide(stillWrittenId)
+        const unfinished = yield* queries.loadGuide(unfinishedId)
+
+        assert.strictEqual(finished.status, "done")
+        assert.strictEqual(stillWritten.status, "planning")
+        assert.deepStrictEqual(
+          [unfinished.status, unfinished.failure],
+          ["failed", "Proofroom stopped."],
+        )
+        assert.deepStrictEqual(
+          unfinished.chapters.map((chapter) => [chapter.key, chapter.status]),
+          [
+            ["discounts", "done"],
+            ["coupons", "failed"],
+          ],
+        )
+      }).pipe(Effect.provide(StorageLayer)),
+  )
+
+  it.effect("guide deleted -> it, its hunks and its drafts are gone; other guides stay", () =>
+    Effect.gen(function* () {
+      const mutations = yield* GuideMutationService
+      const queries = yield* GuideQueryService
+      const draftMutations = yield* DraftMutationService
+      const drafts = yield* DraftQueryService
+      const keptId = yield* mutations.createGuide({ ...discountGuide, hunks: [couponHunk] })
+      const deletedId = yield* mutations.createGuide({ ...discountGuide, hunks: [signatureHunk] })
+      yield* mutations.addChapter(deletedId, {
         key: discountsChapter,
         title: "Discounts",
         purpose: "cartTotal takes a percentage",
       })
-      yield* mutations.addChapter(guideId, {
-        key: couponsChapter,
-        title: "Coupons",
-        purpose: "A first coupon code",
-      })
+      const anchor = { path: "src/cart/total.ts", side: "new", line: 3 } as const
+      yield* draftMutations.addDraft(deletedId, anchor, "Round after the discount?")
+      yield* draftMutations.addDraft(keptId, anchor, "Kept.")
 
-      const diagram = {
-        source: "flowchart LR\n  Items --> Sum --> Discount --> Round",
-        caption: "How a total is computed",
-      }
-      yield* mutations.writeChapter(guideId, discountsChapter, {
-        body: "The total now rounds after discounting.",
-        diagram,
-      })
-      yield* mutations.addFlag(guideId, discountsChapter, {
-        hunkId: signatureHunk.id,
-        line: 2,
-        kind: "hidden-behaviour-change",
-        note: "Rounding moved: totals for existing callers can change by a cent.",
-      })
-      yield* mutations.addExcerpt(guideId, discountsChapter, {
-        hunkId: signatureHunk.id,
-        lines: { start: 1, end: 2 },
-        why: "The signature gains a discount, with 0 as the default.",
-      })
-      yield* mutations.setChapterStatus(guideId, discountsChapter, "done", null)
-      const [discounts, coupons] = (yield* queries.loadGuide(guideId)).chapters
+      yield* mutations.deleteGuide(deletedId)
 
-      assert.strictEqual(discounts?.status, "done")
-      assert.strictEqual(discounts?.body, "The total now rounds after discounting.")
-      assert.deepStrictEqual(discounts?.diagram, diagram)
       assert.deepStrictEqual(
-        discounts?.flags.map((flag) => [flag.hunkId, flag.line, flag.kind]),
-        [[signatureHunk.id, 2, "hidden-behaviour-change"]],
+        yield* Effect.exit(queries.loadGuide(deletedId)),
+        Exit.fail(new GuideNotFound({ guideId: deletedId })),
       )
-      assert.deepStrictEqual(discounts?.excerpts, [
-        {
-          hunkId: signatureHunk.id,
-          lines: { start: 1, end: 2 },
-          why: "The signature gains a discount, with 0 as the default.",
-        },
-      ])
-      assert.deepStrictEqual(coupons?.flags, [])
-      assert.deepStrictEqual(coupons?.excerpts, [])
-    }).pipe(Effect.provide(StorageLayer)),
-  )
-
-  it.effect("hunks saved -> loaded back in diff order", () =>
-    Effect.gen(function* () {
-      const mutations = yield* GuideMutationService
-      const queries = yield* GuideQueryService
-      const guideId = yield* mutations.createGuide(discountGuide)
-
-      yield* mutations.saveHunks(guideId, [signatureHunk, couponHunk])
-      const hunks = yield* queries.loadHunks(guideId)
-
-      assert.deepStrictEqual(hunks, [signatureHunk, couponHunk])
+      assert.deepStrictEqual(yield* drafts.listDrafts(deletedId), [])
+      assert.deepStrictEqual(
+        (yield* queries.listGuides).map((summary) => summary.id),
+        [keptId],
+      )
+      assert.deepStrictEqual(yield* queries.loadHunks(keptId), [couponHunk])
+      assert.strictEqual((yield* drafts.listDrafts(keptId)).length, 1)
     }).pipe(Effect.provide(StorageLayer)),
   )
 
@@ -324,5 +428,39 @@ describe("guide storage", () => {
           ["writing", "Cart totals now take a discount."],
         )
       }).pipe(Effect.provide(StorageLayer)),
+  )
+
+  // Regression: every change queued a reload of its own, so a watcher slower
+  // than the writes fell further behind with each one.
+  it.live("50 changes while the watcher is busy -> a few versions, not one per change", () =>
+    Effect.gen(function* () {
+      const mutations = yield* GuideMutationService
+      const subscriptions = yield* GuideSubscriptionService
+      const guideId = yield* mutations.createGuide(discountGuide)
+
+      const versionsSeen = yield* Ref.make(0)
+      const firstVersionSeen = yield* Deferred.make<void>()
+      const watcherFree = yield* Deferred.make<void>()
+      const watcher = yield* subscriptions.watchGuide(guideId).pipe(
+        Stream.tap(() =>
+          Ref.update(versionsSeen, (count) => count + 1).pipe(
+            Effect.andThen(Deferred.succeed(firstVersionSeen, undefined)),
+            Effect.andThen(Deferred.await(watcherFree)),
+          ),
+        ),
+        Stream.runDrain,
+        Effect.forkChild,
+      )
+      yield* Deferred.await(firstVersionSeen)
+      for (let change = 1; change <= 50; change++) {
+        yield* mutations.setOverview(guideId, { summary: `Change ${change}`, diagram: null })
+      }
+      yield* Deferred.succeed(watcherFree, undefined)
+      // Long enough for 50 reloads of a small in-memory guide many times over.
+      yield* Effect.sleep("300 millis")
+      yield* Fiber.interrupt(watcher)
+
+      assert.isAtMost(yield* Ref.get(versionsSeen), 3)
+    }).pipe(Effect.provide(StorageLayer)),
   )
 })

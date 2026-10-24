@@ -10,6 +10,7 @@ import {
   HunkLineRange,
   MermaidDiagram,
   PlacementTarget,
+  Visual,
   type Chapter,
   type Excerpt,
   type Flag,
@@ -22,7 +23,8 @@ import { Schema, Struct } from "effect"
 //
 // Writes encode a domain value into a row with these schemas, and reads decode
 // a row back with the same schemas, so the two directions can't drift apart.
-// Nested values (a diagram, a placement's target) are stored as JSON text.
+// Nested values (a diagram, a visual, a placement's target) are stored as JSON
+// text.
 
 export const GuideRow = Schema.Struct({
   id: GuideId,
@@ -38,6 +40,7 @@ export const GuideRow = Schema.Struct({
   overviewDiagram: Schema.NullOr(Schema.fromJsonString(MermaidDiagram)),
   failure: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
+  writerPid: Schema.NullOr(Schema.Int),
 })
 export type GuideRow = typeof GuideRow.Type
 
@@ -48,7 +51,6 @@ export const ChapterRow = Schema.Struct({
   purpose: Schema.String,
   status: ChapterStatus,
   body: Schema.NullOr(Schema.String),
-  diagram: Schema.NullOr(Schema.fromJsonString(MermaidDiagram)),
   failure: Schema.NullOr(Schema.String),
 })
 export type ChapterRow = typeof ChapterRow.Type
@@ -77,6 +79,12 @@ export const ExcerptRow = Schema.Struct({
 })
 export type ExcerptRow = typeof ExcerptRow.Type
 
+export const VisualRow = Schema.Struct({
+  chapterKey: ChapterKey,
+  visual: Schema.fromJsonString(Visual),
+})
+export type VisualRow = typeof VisualRow.Type
+
 export const HunkRow = Schema.Struct({
   id: HunkId,
   // The hunk's place in the diff, so reads return hunks in diff order.
@@ -96,6 +104,7 @@ export interface GuideRows {
   readonly guide: GuideRow
   readonly chapters: ReadonlyArray<ChapterRow>
   readonly placements: ReadonlyArray<PlacementRow>
+  readonly visuals: ReadonlyArray<VisualRow>
   readonly excerpts: ReadonlyArray<ExcerptRow>
   readonly flags: ReadonlyArray<FlagRow>
 }
@@ -120,13 +129,16 @@ export function toGuide(rows: GuideRows): Guide {
 }
 
 function toChapter(chapter: ChapterRow, rows: GuideRows): Chapter {
+  const visuals: Array<Visual> = rows.visuals
+    .filter((visual) => visual.chapterKey === chapter.key)
+    .map(({ visual }) => visual)
   const excerpts: Array<Excerpt> = rows.excerpts
     .filter((excerpt) => excerpt.chapterKey === chapter.key)
     .map(({ hunkId, lines, why }) => ({ hunkId, lines, why }))
   const flags: Array<Flag> = rows.flags
     .filter((flag) => flag.chapterKey === chapter.key)
     .map(({ hunkId, line, kind, note }) => ({ hunkId, line, kind, note }))
-  return { ...chapter, excerpts, flags }
+  return { ...chapter, visuals, excerpts, flags }
 }
 
 export function toGuideSummary(row: GuideSummaryRow): GuideSummary {

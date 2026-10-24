@@ -2,6 +2,7 @@ import { useAtomSet } from "@effect/atom-react"
 import type { CommentAnchor, GuideId } from "@proofroom/protocol"
 import { Exit } from "effect"
 import { useState } from "react"
+import { SaveFailed } from "../components/SaveFailed.tsx"
 import { addDraftAtom, composerAnchorAtom, draftsChanged } from "./review-atoms.ts"
 
 // The box a new comment is written in, under the line it is about. Saving it
@@ -18,6 +19,7 @@ export function CommentComposer({
 }) {
   const [body, setBody] = useState("")
   const [isSaving, setIsSaving] = useState(false)
+  const [saveFailed, setSaveFailed] = useState(false)
   const addDraft = useAtomSet(addDraftAtom, { mode: "promiseExit" })
   const closeComposer = useAtomSet(composerAnchorAtom)
 
@@ -28,6 +30,7 @@ export function CommentComposer({
       reactivityKeys: [draftsChanged(guideId)],
     })
     setIsSaving(false)
+    setSaveFailed(Exit.isFailure(exit))
     if (Exit.isSuccess(exit)) closeComposer(null)
   }
 
@@ -44,7 +47,8 @@ export function CommentComposer({
         value={body}
         onChange={(event) => setBody(event.target.value)}
       />
-      <div className="mt-2 flex justify-end gap-2">
+      <div className="mt-2 flex items-center justify-end gap-2">
+        {saveFailed && <SaveFailed />}
         <button
           className="rounded px-3 py-1 text-sm text-stone-600 hover:bg-stone-100"
           onClick={() => closeComposer(null)}

@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import type { Command } from "../process/run-command.ts"
 import { AgentRunFailed, type AgentRun, type AgentRunResult } from "./agent-run.ts"
 
@@ -80,30 +80,27 @@ const CodexEvent = Schema.Struct({
 })
 type CodexEvent = typeof CodexEvent.Type
 
+// The turn's own outcome decides how the run went. An `error` event on the way
+// can be one Codex recovered from, such as a dropped connection it retried, so
+// it only explains a turn that didn't finish. A line that isn't an event, such
+// as a warning, is skipped rather than failing a run that went fine.
 export function readCodexResult(stdout: string): Effect.Effect<AgentRunResult, AgentRunFailed> {
-  const lines = stdout.split("\n").filter((line) => line.trim() !== "")
-  return Effect.forEach(lines, (line) =>
-    Schema.decodeUnknownEffect(Schema.fromJsonString(CodexEvent))(line),
-  ).pipe(
-    Effect.mapError(
-      (error) =>
-        new AgentRunFailed({ message: `Codex printed something unexpected: ${error.message}` }),
-    ),
-    Effect.flatMap((events) => {
-      const failure = events.find(isFailure)
-      if (failure !== undefined) {
-        return Effect.fail(
-          new AgentRunFailed({
-            message: `Codex stopped with an error: ${failureMessage(failure)}`,
-          }),
-        )
-      }
-      return Effect.succeed({ finalMessage: lastAgentMessage(events), costUsd: null })
-    }),
+  const events = stdout.split("\n").flatMap(readEvent)
+  const turnEnd = events.findLast(
+    (event) => event.type === "turn.completed" || event.type === "turn.failed",
   )
+  if (turnEnd?.type === "turn.completed") {
+    return Effect.succeed({ finalMessage: lastAgentMessage(events), costUsd: null })
+  }
+  const failure = turnEnd ?? events.findLast((event) => event.type === "error")
+  const reason = failure === undefined ? "it never finished its turn" : failureMessage(failure)
+  return Effect.fail(new AgentRunFailed({ message: `Codex stopped with an error: ${reason}` }))
 }
 
-const isFailure = (event: CodexEvent) => event.type === "turn.failed" || event.type === "error"
+function readEvent(line: string): Array<CodexEvent> {
+  const event = Schema.decodeUnknownOption(Schema.fromJsonString(CodexEvent))(line)
+  return Option.toArray(event)
+}
 
 function failureMessage(event: CodexEvent): string {
   return event.error?.message ?? event.message ?? "no details"

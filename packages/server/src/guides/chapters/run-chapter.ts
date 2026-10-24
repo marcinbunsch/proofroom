@@ -1,5 +1,6 @@
 import {
   ChapterToolkit,
+  HistoryToolkit,
   type AgentCli,
   type Chapter,
   type Guide,
@@ -9,6 +10,7 @@ import { Deferred, Effect, Layer, Schema } from "effect"
 import { McpServer } from "effect/ai"
 import { AgentRunnerService } from "../../agents/AgentRunnerService.ts"
 import { serveTools } from "../../agents/tool-server.ts"
+import { historyToolHandlers } from "../history-tools.ts"
 import type { LoadedPullRequest } from "../../pull-requests/PullRequestService.ts"
 import { chapterPrompt, type PlacedHunk } from "./chapter-prompt.ts"
 import { chapterToolHandlers } from "./chapter-tools.ts"
@@ -33,7 +35,8 @@ const chapterTimeLimit = "20 minutes"
 
 // Writes one chapter from start to finish:
 //
-// 1. Serve the chapter's tools, which only accept flags on its own hunks.
+// 1. Serve the chapter's tools, which only accept flags and excerpts on its
+//    own lines.
 // 2. Start the agent CLI with the chapter prompt, and wait for it to exit.
 // 3. Check finish_chapter was called after the chapter got its text.
 export function runChapter(input: ChapterInput) {
@@ -43,7 +46,7 @@ export function runChapter(input: ChapterInput) {
     const chapterFinished = yield* Deferred.make<void>()
     const toolServer = yield* serveChapterTools(input, placedHunks, chapterFinished)
 
-    const result = yield* runner
+    const agentExit = yield* runner
       .run({
         cli: input.cli,
         model: null,
@@ -59,14 +62,15 @@ export function runChapter(input: ChapterInput) {
               new ChapterFailed({ message: `Writing the chapter took over ${chapterTimeLimit}.` }),
             ),
         }),
+        Effect.exit,
       )
 
-    const isFinished = yield* Deferred.isDone(chapterFinished)
-    if (!isFinished) {
-      return yield* new ChapterFailed({
-        message: `The chapter run stopped before finishing. Its last message: ${result.finalMessage}`,
-      })
-    }
+    // A finished chapter stands, whatever the agent does after it.
+    if (yield* Deferred.isDone(chapterFinished)) return
+    const result = yield* agentExit
+    return yield* new ChapterFailed({
+      message: `The chapter run stopped before finishing. Its last message: ${result.finalMessage}`,
+    })
   }).pipe(
     Effect.scoped,
     Effect.catchTags({
@@ -98,16 +102,23 @@ function serveChapterTools(
 ) {
   return Effect.gen(function* () {
     const handlers = yield* Layer.build(
-      chapterToolHandlers({
-        guideId: input.guideId,
-        chapterKey: input.chapter.key,
-        hunks: placedHunks.map((placed) => placed.hunk),
-        chapterFinished,
-      }),
+      Layer.merge(
+        chapterToolHandlers({
+          guideId: input.guideId,
+          chapterKey: input.chapter.key,
+          placedHunks,
+          chapterFinished,
+        }),
+        historyToolHandlers(input.checkout),
+      ),
     )
-    const tools = McpServer.toolkit(ChapterToolkit).pipe(
-      Layer.provide(Layer.succeedContext(handlers)),
-    )
-    return yield* serveTools(tools, Object.keys(ChapterToolkit.tools))
+    const tools = Layer.merge(
+      McpServer.toolkit(ChapterToolkit),
+      McpServer.toolkit(HistoryToolkit),
+    ).pipe(Layer.provide(Layer.succeedContext(handlers)))
+    return yield* serveTools(tools, [
+      ...Object.keys(ChapterToolkit.tools),
+      ...Object.keys(HistoryToolkit.tools),
+    ])
   })
 }

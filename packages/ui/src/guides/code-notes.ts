@@ -70,6 +70,17 @@ export function anchorForSelection(path: string, selection: SelectedLineRange): 
   return { path, side: side === "deletions" ? "old" : "new", line: selection.end }
 }
 
+// What the diff should show as selected: the line a comment is being written
+// on, when it is in this file, or nothing.
+export function selectionFor(
+  path: string,
+  composerAnchor: CommentAnchor | null,
+): SelectedLineRange | null {
+  if (composerAnchor === null || composerAnchor.path !== path) return null
+  const side = toDiffSide(composerAnchor.side)
+  return { start: composerAnchor.line, side, end: composerAnchor.line, endSide: side }
+}
+
 function toDiffSide(side: CommentAnchor["side"]): DiffSide {
   return side === "old" ? "deletions" : "additions"
 }

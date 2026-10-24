@@ -66,7 +66,7 @@ function guideAsText(guide: Guide, hunks: ReadonlyArray<Hunk>): string {
         `Purpose: ${chapter.purpose}`,
         chapter.failure === null ? "" : `FAILED: ${chapter.failure}`,
         chapter.body ?? "",
-        diagramText(chapter.diagram),
+        ...chapter.visuals.map((visual) => `[${visual._tag}] ${JSON.stringify(visual)}`),
         ...chapter.flags.map(
           (flag) => `⚑ ${flag.kind} at ${flag.hunkId} line ${flag.line}: ${flag.note}`,
         ),

@@ -10,11 +10,12 @@ import {
   type MermaidDiagram,
   type Placement,
   type PullRequestRef,
+  type Visual,
 } from "@proofroom/protocol"
 import { Context, DateTime, Effect, Layer, Schema } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 import { GuideSubscriptionService } from "./GuideSubscriptionService.ts"
-import { ChapterRow, ExcerptRow, FlagRow, GuideRow, HunkRow, PlacementRow } from "./rows.ts"
+import { ExcerptRow, FlagRow, GuideRow, HunkRow, PlacementRow, VisualRow } from "./rows.ts"
 
 // Every change to a guide, one write per function: the mutations, in GraphQL
 // terms. GuideQueryService holds the reads.
@@ -26,8 +27,9 @@ import { ChapterRow, ExcerptRow, FlagRow, GuideRow, HunkRow, PlacementRow } from
 // run has no sensible fallback, and callers shouldn't have to handle SqlError.
 
 export interface GuideMutations {
+  // The guide and its pull request's hunks, saved together: a guide is never
+  // there without the hunks it is about.
   readonly createGuide: (guide: NewGuide) => Effect.Effect<GuideId>
-  readonly saveHunks: (guideId: GuideId, hunks: ReadonlyArray<Hunk>) => Effect.Effect<void>
   readonly setGuideStatus: (
     guideId: GuideId,
     status: GuideStatus,
@@ -52,12 +54,26 @@ export interface GuideMutations {
     chapterKey: ChapterKey,
     text: ChapterText,
   ) => Effect.Effect<void>
+  readonly addVisual: (
+    guideId: GuideId,
+    chapterKey: ChapterKey,
+    visual: Visual,
+  ) => Effect.Effect<void>
   readonly addExcerpt: (
     guideId: GuideId,
     chapterKey: ChapterKey,
     excerpt: Excerpt,
   ) => Effect.Effect<void>
   readonly addFlag: (guideId: GuideId, chapterKey: ChapterKey, flag: Flag) => Effect.Effect<void>
+  // The guide and everything about it, including draft comments not sent yet.
+  // Draft comments belong to reviews, but they can't outlive their guide.
+  readonly deleteGuide: (guideId: GuideId) => Effect.Effect<void>
+  // Fails every guide still being planned or written whose writer process has
+  // stopped, and its unfinished chapters, with the reason.
+  readonly failAbandonedGuides: (
+    reason: string,
+    isWriterRunning: (writerPid: number) => boolean,
+  ) => Effect.Effect<void>
 }
 
 export interface NewGuide {
@@ -66,6 +82,9 @@ export interface NewGuide {
   readonly headSha: string
   readonly mergeBaseSha: string
   readonly cli: AgentCli
+  readonly hunks: ReadonlyArray<Hunk>
+  // The process that will write the guide.
+  readonly writerPid: number
 }
 
 export interface Overview {
@@ -81,7 +100,6 @@ export interface NewChapter {
 
 export interface ChapterText {
   readonly body: string
-  readonly diagram: MermaidDiagram | null
 }
 
 export class GuideMutationService extends Context.Service<GuideMutationService, GuideMutations>()(
@@ -107,7 +125,6 @@ function makeGuideMutationService() {
 
     return GuideMutationService.of({
       createGuide: (guide) => insertGuide(sql, guide).pipe(Effect.orDie),
-      saveHunks: (guideId, hunks) => insertHunks(sql, guideId, hunks).pipe(Effect.orDie),
       setGuideStatus: (guideId, status, failure) =>
         updateGuideStatus(sql, guideId, status, failure).pipe(thenAnnounce(guideId)),
       setOverview: (guideId, overview) =>
@@ -120,10 +137,15 @@ function makeGuideMutationService() {
         updateChapterStatus(sql, guideId, chapterKey, status, failure).pipe(thenAnnounce(guideId)),
       writeChapter: (guideId, chapterKey, text) =>
         updateChapterText(sql, guideId, chapterKey, text).pipe(thenAnnounce(guideId)),
+      addVisual: (guideId, chapterKey, visual) =>
+        insertVisual(sql, guideId, chapterKey, visual).pipe(thenAnnounce(guideId)),
       addExcerpt: (guideId, chapterKey, excerpt) =>
         insertExcerpt(sql, guideId, chapterKey, excerpt).pipe(thenAnnounce(guideId)),
       addFlag: (guideId, chapterKey, flag) =>
         insertFlag(sql, guideId, chapterKey, flag).pipe(thenAnnounce(guideId)),
+      deleteGuide: (guideId) => deleteGuideAndItsRows(sql, guideId).pipe(thenAnnounce(guideId)),
+      failAbandonedGuides: (reason, isWriterRunning) =>
+        failAbandoned(sql, reason, isWriterRunning).pipe(Effect.orDie),
     })
   })
 }
@@ -147,8 +169,14 @@ function insertGuide(sql: SqlClient.SqlClient, guide: NewGuide) {
       overviewDiagram: null,
       failure: null,
       createdAt: DateTime.formatIso(now),
+      writerPid: guide.writerPid,
     }
-    yield* sql`INSERT INTO guides ${sql.insert(encodeGuideRow(row))}`
+    yield* sql.withTransaction(
+      Effect.gen(function* () {
+        yield* sql`INSERT INTO guides ${sql.insert(encodeGuideRow(row))}`
+        yield* insertHunks(sql, row.id, guide.hunks)
+      }),
+    )
     return row.id
   })
 }
@@ -160,6 +188,55 @@ function updateGuideStatus(
   failure: string | null,
 ) {
   return sql`UPDATE guides SET status = ${status}, failure = ${failure} WHERE id = ${guideId}`
+}
+
+// Children first, the guide last, in one transaction: a guide is never left
+// half deleted.
+function deleteGuideAndItsRows(sql: SqlClient.SqlClient, guideId: GuideId) {
+  return sql.withTransaction(
+    Effect.gen(function* () {
+      for (const table of guideOwnedTables) {
+        yield* sql`DELETE FROM ${sql(table)} WHERE guideId = ${guideId}`
+      }
+      yield* sql`DELETE FROM guides WHERE id = ${guideId}`
+    }),
+  )
+}
+
+const guideOwnedTables = [
+  "draftComments",
+  "visuals",
+  "excerpts",
+  "flags",
+  "placements",
+  "chapters",
+  "hunks",
+] as const
+
+function failAbandoned(
+  sql: SqlClient.SqlClient,
+  reason: string,
+  isWriterRunning: (writerPid: number) => boolean,
+) {
+  return sql.withTransaction(
+    Effect.gen(function* () {
+      const unfinished = yield* sql<{ readonly id: string; readonly writerPid: number | null }>`
+        SELECT id, writerPid FROM guides WHERE status IN ('planning', 'writing')
+      `
+      const abandonedIds = unfinished
+        .filter(({ writerPid }) => writerPid === null || !isWriterRunning(writerPid))
+        .map(({ id }) => id)
+      if (abandonedIds.length === 0) return
+      yield* sql`
+        UPDATE chapters SET status = 'failed', failure = ${reason}
+        WHERE status IN ('waiting', 'writing') AND ${sql.in("guideId", abandonedIds)}
+      `
+      yield* sql`
+        UPDATE guides SET status = 'failed', failure = ${reason}
+        WHERE ${sql.in("id", abandonedIds)}
+      `
+    }),
+  )
 }
 
 function updateOverview(sql: SqlClient.SqlClient, guideId: GuideId, overview: Overview) {
@@ -235,11 +312,20 @@ function updateChapterText(
   chapterKey: ChapterKey,
   text: ChapterText,
 ) {
-  const diagram = encodeDiagram(text.diagram)
   return sql`
-    UPDATE chapters SET body = ${text.body}, diagram = ${diagram}
+    UPDATE chapters SET body = ${text.body}
     WHERE guideId = ${guideId} AND key = ${chapterKey}
   `
+}
+
+function insertVisual(
+  sql: SqlClient.SqlClient,
+  guideId: GuideId,
+  chapterKey: ChapterKey,
+  visual: Visual,
+) {
+  const row = encodeVisualRow({ chapterKey, visual })
+  return sql`INSERT INTO visuals ${sql.insert({ guideId, ...row })}`
 }
 
 function insertExcerpt(
@@ -267,6 +353,7 @@ function insertFlag(
 const encodeGuideRow = Schema.encodeSync(GuideRow)
 const encodeHunkRow = Schema.encodeSync(HunkRow)
 const encodePlacementRow = Schema.encodeSync(PlacementRow)
+const encodeVisualRow = Schema.encodeSync(VisualRow)
 const encodeExcerptRow = Schema.encodeSync(ExcerptRow)
 const encodeFlagRow = Schema.encodeSync(FlagRow)
-const encodeDiagram = Schema.encodeSync(ChapterRow.fields.diagram)
+const encodeDiagram = Schema.encodeSync(GuideRow.fields.overviewDiagram)

@@ -27,6 +27,7 @@ export const RpcHandlersLive = ProofroomRpcs.toLayer(
           .pipe(Effect.mapError((error) => new GenerateFailed({ message: error.message }))),
       listGuides: () => queries.listGuides,
       watchGuide: ({ guideId }) => subscriptions.watchGuide(guideId),
+      deleteGuide: ({ guideId }) => generation.delete(guideId),
       getHunks: ({ guideId }) => queries.loadHunks(guideId),
 
       listDraftComments: ({ guideId }) => drafts.listDrafts(guideId),

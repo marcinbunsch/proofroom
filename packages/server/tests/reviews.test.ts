@@ -30,6 +30,8 @@ function createDiscountGuide() {
       headSha,
       mergeBaseSha: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
       cli: "claude",
+      hunks: [],
+      writerPid: process.pid,
     })
   })
 }
@@ -125,6 +127,38 @@ describe("submitting a review", () => {
       }).pipe(Effect.provide(reviewLayer(github)))
     },
   )
+
+  it.effect("drafts written or edited while the review is sent -> kept for the next review", () => {
+    const github = new FakeGitHub()
+    return Effect.gen(function* () {
+      const reviews = yield* ReviewService
+      const drafts = yield* DraftQueryService
+      const draftMutations = yield* DraftMutationService
+      const guideId = yield* createDiscountGuide()
+      const sent = yield* reviews.addDraft(guideId, roundingLine, "Round after the discount?")
+      const edited = yield* reviews.addDraft(
+        guideId,
+        removedReturnLine,
+        "Anything relying on this?",
+      )
+      github.whileSubmitting = Effect.gen(function* () {
+        yield* reviews.addDraft(guideId, roundingLine, "Also: name the magic 100.")
+        yield* draftMutations.updateDraft(edited.id, "Was anything relying on this return?")
+      }).pipe(Effect.orDie)
+
+      yield* reviews.submit(guideId, "comment", "Two questions.")
+
+      const kept = yield* drafts.listDrafts(guideId)
+      assert.deepStrictEqual(
+        kept.map((draft) => draft.body),
+        ["Was anything relying on this return?", "Also: name the magic 100."],
+      )
+      assert.notInclude(
+        kept.map((draft) => draft.id),
+        sent.id,
+      )
+    }).pipe(Effect.provide(reviewLayer(github)))
+  })
 
   it.effect("approval with no summary -> sent; GitHub doesn't need one to approve", () => {
     const github = new FakeGitHub()

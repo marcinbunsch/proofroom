@@ -12,6 +12,7 @@ import {
   composerNotes,
   draftNotes,
   flagNotes,
+  selectionFor,
 } from "../src/guides/code-notes.ts"
 
 // cartTotal's return changes: line 2 of the hunk is the deleted `return sum`
@@ -119,5 +120,22 @@ describe("anchorForSelection", () => {
       side: "old",
       line: 6,
     })
+  })
+})
+
+describe("selectionFor", () => {
+  // Regression: the diff kept the line whose comment button was pressed
+  // selected, so after the box closed its button stuck to that line instead of
+  // following the pointer. Proofroom now says what is selected.
+  it("box open on this file -> that line selected; closed or another file -> nothing", () => {
+    const anchor = { path: "src/cart/total.ts", side: "old", line: 6 } as const
+    expect(selectionFor("src/cart/total.ts", anchor)).toEqual({
+      start: 6,
+      side: "deletions",
+      end: 6,
+      endSide: "deletions",
+    })
+    expect(selectionFor("src/cart/total.ts", null)).toBeNull()
+    expect(selectionFor("src/cart/coupons.ts", anchor)).toBeNull()
   })
 })

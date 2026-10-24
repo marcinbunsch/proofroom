@@ -46,7 +46,14 @@ function makeGuideSubscriptionService() {
             Stream.filter((changedGuideId) => changedGuideId === guideId),
           )
           const guideNow = Stream.fromEffect(queries.loadGuide(guideId))
+          // One reload per change would fall behind a watcher slower than
+          // the writes: the UI over the network, while a planner places
+          // hundreds of hunks. Changes that come in while it is busy wait as
+          // one, sliding out the older ones, so the next reload covers them
+          // all.
           const guideAfterEachChange = changesToThisGuide.pipe(
+            Stream.buffer({ capacity: 1, strategy: "sliding" }),
+            Stream.chunks,
             Stream.mapEffect(() => queries.loadGuide(guideId)),
           )
           return Stream.concat(guideNow, guideAfterEachChange)

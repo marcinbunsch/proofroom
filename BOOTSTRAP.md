@@ -172,8 +172,17 @@ were written for you.
 3. Diagrams are written in Mermaid, a simple text format for diagrams. The
    app draws them with Pele (https://pele.run), using the app's own colours
    and fonts.
-4. Other types are drawn by the app's own code: before/after comparisons,
-   pieces of code, a map of which files changed how much.
+4. Other types are drawn by the app's own code. The first ones:
+   - **Behaviour change:** cases where the code now does something
+     different, each with what used to happen and what happens now.
+   - **API change:** what callers see (functions, endpoints, config keys,
+     types), each as it was and as it is.
+   - **Flow:** a path through the code with what was added, changed or
+     removed marked on it. A node can name its file; clicking it opens the
+     file on the Diff tab. The app writes the Mermaid for it, so nothing the
+     AI wrote becomes Mermaid syntax.
+5. A chapter has up to three visuals and at most 150 words of text. The
+   structure of a change goes in visuals, which read faster than prose.
 
 ### Adding new types
 
@@ -271,7 +280,9 @@ Then, in this order:
 ### How a guide gets written
 
 1. The app runs `git diff` itself and splits the change into hunks. Each hunk
-   gets a stable ID made from its file and a hash of its content.
+   gets a stable ID made from its file and a hash of its changed and context
+   lines, not its position, so a hunk keeps its ID when edits above it move
+   it down the file.
 2. The app makes a `git worktree` at the pull request's exact latest commit,
    from its own clone in `~/.proofroom/repos`. Your own checkouts are never
    touched. The planner and the chapter runs of one guide share this
@@ -293,9 +304,13 @@ Then, in this order:
 8. "Go deeper" and questions about a spot in the guide reuse the chapter-run
    path.
 
-**What the agents may do.** Read files, run read-only commands (`git log`,
-`git blame`, `rg`), and call Proofroom's MCP tools. They may not write
-files, use the network, or install anything. The app sets this once,
+**What the agents may do.** Read and search files, and call Proofroom's MCP
+tools, which include reading the code's history (`git_log`, `git_show`,
+`git_blame`). They may not write files, use the network, or install
+anything. Claude Code gets no shell at all: an allow-list of shell commands
+can't be made read-only, since `git log --output=<file>` writes any file and
+`rg --pre` runs any program. So Proofroom runs git itself, with arguments it
+chose, and the agent only names a commit or a file. The app sets this once,
 through each tool's own controls (Claude Code's allowed-tools list and
 Codex's read-only sandbox). So a run never stops to ask permission. The MCP
 server listens on the laptop only and needs a secret that is new for every
@@ -311,12 +326,12 @@ settings that made it work:
     server is loaded.
   - `--setting-sources ""`: the user's own settings, hooks and allow-lists
     are left out.
-  - `--tools "Read,Grep,Glob,Bash"`.
-  - `--allowedTools` listing the Proofroom MCP tools and the read-only
-    commands, e.g. `"Bash(git log:*)"`.
+  - `--tools "Read,Grep,Glob"`: no Bash.
+  - `--allowedTools` listing the Proofroom MCP tools.
   - `--permission-mode dontAsk` and `--permission-prompts none`: anything
     not allowed is refused, never asked about.
-  - `--no-session-persistence --output-format stream-json`.
+  - `--no-session-persistence --output-format json`: one JSON result when
+    the run ends, with its final message and cost.
   - `--bare` can't be used: it only accepts API keys, and we rely on the
     user's own login.
   - `CLAUDE_CONFIG_DIR` is passed on when set in Proofroom's environment, so
@@ -392,8 +407,11 @@ tab, so they look identical. Syntax colouring uses `@pierre/highlights`
    this" note for the AI, and a React component.
 2. The app bundles plugins with esbuild when it starts and whenever the
    folder changes. No new release needed.
-3. The built-in types live in `packages/ui/src/visualizations/` in exactly
-   the same format. The Mermaid ones are drawn by Pele.
+3. For now the built-in types are split three ways: their data in
+   `packages/protocol/src/visuals.ts`, the server's checks in
+   `packages/server/src/guides/visuals.ts`, and their drawing in
+   `packages/ui/src/visuals/`. They move into the plugin format when it
+   exists. The Mermaid ones are drawn by Pele.
 4. A plugin the AI proposes is unreviewed code. It only ever renders inside a
    sandboxed iframe until you approve it.
 5. The server draws every Mermaid diagram with Pele the moment the MCP call

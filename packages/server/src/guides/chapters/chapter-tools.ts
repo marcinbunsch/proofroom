@@ -2,6 +2,7 @@ import {
   ChapterToolkit,
   ToolRejected,
   type AddFlag,
+  type AddVisual,
   type ChapterKey,
   type GuideId,
   type Hunk,
@@ -10,11 +11,12 @@ import {
   type ShowCode,
   type WriteChapter,
 } from "@proofroom/protocol"
-import { Deferred, Effect } from "effect"
+import { Deferred, Effect, Semaphore } from "effect"
 import type { Tool } from "effect/ai"
 import { GuideMutationService } from "../../storage/guides/GuideMutationService.ts"
 import { GuideQueryService } from "../../storage/guides/GuideQueryService.ts"
-import { checkDiagram } from "../diagrams.ts"
+import { checkVisual } from "../visuals.ts"
+import type { PlacedHunk } from "./chapter-prompt.ts"
 
 // The tools for writing one chapter. As with the planner's tools, every call
 // is checked before anything is saved, and the database is the only record of
@@ -23,26 +25,31 @@ import { checkDiagram } from "../diagrams.ts"
 export interface ChapterRun {
   readonly guideId: GuideId
   readonly chapterKey: ChapterKey
-  // The hunks placed in this chapter. Flags may only point into these.
-  readonly hunks: ReadonlyArray<Hunk>
+  // The hunks, or parts of hunks, placed in this chapter. Flags and excerpts
+  // may only point at these lines.
+  readonly placedHunks: ReadonlyArray<PlacedHunk>
   // Completed by finish_chapter once the chapter has text.
   readonly chapterFinished: Deferred.Deferred<void>
 }
 
+// Calls are handled one at a time, as the planner's are: two show_code calls
+// at once would both see room for one more excerpt.
 export function chapterToolHandlers(run: ChapterRun) {
   return ChapterToolkit.toLayer(
     Effect.gen(function* () {
       const context: ChapterContext = {
         run,
-        hunksById: new Map(run.hunks.map((hunk) => [hunk.id, hunk])),
+        hunksById: new Map(run.placedHunks.map(({ hunk }) => [hunk.id, hunk])),
         queries: yield* GuideQueryService,
         mutations: yield* GuideMutationService,
       }
+      const oneAtATime = (yield* Semaphore.make(1)).withPermit
       return {
-        write_chapter: (parameters) => writeChapter(context, parameters),
-        show_code: (parameters) => showCode(context, parameters),
-        add_flag: (parameters) => addFlag(context, parameters),
-        finish_chapter: () => finishChapter(context),
+        write_chapter: (parameters) => oneAtATime(writeChapter(context, parameters)),
+        add_visual: (parameters) => oneAtATime(addVisual(context, parameters)),
+        show_code: (parameters) => oneAtATime(showCode(context, parameters)),
+        add_flag: (parameters) => oneAtATime(addFlag(context, parameters)),
+        finish_chapter: () => oneAtATime(finishChapter(context)),
       }
     }),
   )
@@ -57,19 +64,34 @@ interface ChapterContext {
 
 // --- the tools ---------------------------------------------------------------------
 
-function writeChapter(
-  context: ChapterContext,
-  { body, diagram }: Tool.Parameters<typeof WriteChapter>,
-) {
+// The text says what changed and why it matters; cases, signatures and flows
+// go in visuals, where they read faster than prose.
+function writeChapter(context: ChapterContext, { body }: Tool.Parameters<typeof WriteChapter>) {
   return Effect.gen(function* () {
-    if (body.trim() === "")
-      return yield* new ToolRejected({ message: "The chapter text is empty." })
-    yield* checkDiagram(diagram)
-    yield* context.mutations.writeChapter(context.run.guideId, context.run.chapterKey, {
-      body,
-      diagram,
-    })
+    const wordCount = countWords(body)
+    if (wordCount === 0) return yield* new ToolRejected({ message: "The chapter text is empty." })
+    if (wordCount > maxChapterWords) {
+      return yield* new ToolRejected({
+        message: `The chapter text is ${wordCount} words; keep it to ${maxChapterWords}. Move cases, signatures and flows into add_visual, and leave out what the excerpts show.`,
+      })
+    }
+    yield* context.mutations.writeChapter(context.run.guideId, context.run.chapterKey, { body })
     return "Chapter saved."
+  })
+}
+
+function addVisual(context: ChapterContext, { visual }: Tool.Parameters<typeof AddVisual>) {
+  return Effect.gen(function* () {
+    const chapterPaths = new Set(context.run.placedHunks.map(({ hunk }) => hunk.path))
+    yield* checkVisual(visual, chapterPaths)
+    const chapter = yield* loadChapter(context)
+    if (chapter.visuals.length >= maxVisualsPerChapter) {
+      return yield* new ToolRejected({
+        message: `This chapter already has ${maxVisualsPerChapter} visuals, the most it may. Keep the ones that show the most.`,
+      })
+    }
+    yield* context.mutations.addVisual(context.run.guideId, context.run.chapterKey, visual)
+    return "Visual saved."
   })
 }
 
@@ -86,6 +108,18 @@ function showCode(context: ChapterContext, excerpt: Tool.Parameters<typeof ShowC
     }
     const problem = excerptProblem(hunk, excerpt.lines)
     if (problem !== null) return yield* new ToolRejected({ message: problem })
+    const showsThisChapter = hunk.lines.some(
+      (line, index) =>
+        line.kind !== "context" &&
+        excerpt.lines.start <= index + 1 &&
+        index + 1 <= excerpt.lines.end &&
+        isPlacedHere(context, hunk.id, index + 1),
+    )
+    if (!showsThisChapter) {
+      return yield* new ToolRejected({
+        message: `Lines ${excerpt.lines.start}-${excerpt.lines.end} of ${hunk.id} show none of this chapter's changes. ${linesPlacedHere(context, hunk.id)}`,
+      })
+    }
 
     const chapter = yield* loadChapter(context)
     if (chapter.excerpts.length >= maxExcerptsPerChapter) {
@@ -112,6 +146,11 @@ function addFlag(context: ChapterContext, flag: Tool.Parameters<typeof AddFlag>)
         message: `${flag.hunkId} has ${hunk.lines.length} lines; line ${flag.line} is out of range.`,
       })
     }
+    if (!isPlacedHere(context, hunk.id, flag.line)) {
+      return yield* new ToolRejected({
+        message: `Line ${flag.line} of ${hunk.id} belongs to another chapter. ${linesPlacedHere(context, hunk.id)}`,
+      })
+    }
     yield* context.mutations.addFlag(context.run.guideId, context.run.chapterKey, flag)
     return "Flag saved."
   })
@@ -126,6 +165,16 @@ function finishChapter(context: ChapterContext) {
     yield* Deferred.succeed(context.run.chapterFinished, undefined)
     return "Chapter finished. You are done; stop now."
   })
+}
+
+// 150 words: a few sentences on what changed and why it matters. A chapter that
+// needs more is either two chapters or has structure a visual shows better.
+const maxChapterWords = 150
+// 3 visuals: one per thing worth seeing, not a gallery.
+const maxVisualsPerChapter = 3
+
+function countWords(text: string): number {
+  return text.split(/\s+/).filter((word) => word !== "").length
 }
 
 // 3 excerpts of up to 15 lines: enough to show the heart of a change or the
@@ -147,6 +196,23 @@ export function excerptProblem(hunk: Hunk, lines: HunkLineRange): string | null 
   if (!showsAChange)
     return `Lines ${lines.start}-${lines.end} of ${hunk.id} don't include a changed line.`
   return null
+}
+
+// The planner can split a hunk between chapters; a chapter only owns the lines
+// placed in it.
+function isPlacedHere(context: ChapterContext, hunkId: HunkId, line: number): boolean {
+  return context.run.placedHunks.some(
+    (placed) =>
+      placed.hunk.id === hunkId &&
+      (placed.lines === null || (placed.lines.start <= line && line <= placed.lines.end)),
+  )
+}
+
+function linesPlacedHere(context: ChapterContext, hunkId: HunkId): string {
+  const ranges = context.run.placedHunks
+    .filter((placed) => placed.hunk.id === hunkId && placed.lines !== null)
+    .map(({ lines }) => `${lines?.start}-${lines?.end}`)
+  return `This chapter has lines ${ranges.join(", ")} of it.`
 }
 
 // The guide and chapter are always there while the chapter is written; a

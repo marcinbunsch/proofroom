@@ -4,9 +4,9 @@ import type { Hunk, PullRequestRef } from "@proofroom/protocol"
 import { Context, Effect, Layer, Schema, type Scope } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import { AppPaths } from "../AppPaths.ts"
-import { runCommand } from "../process/run-command.ts"
 import { GitRemoteUrl } from "./GitRemoteUrl.ts"
 import { parseUnifiedDiff } from "./parse-diff.ts"
+import { runGit } from "./run-git.ts"
 
 // Proofroom's own git work: one bare clone per repository, fetched before each
 // guide, and a throwaway worktree for the agents to read. Nothing here commits,
@@ -64,12 +64,9 @@ function makeGitService() {
     const remoteUrlFor = yield* GitRemoteUrl
 
     const git: RunGit = (args, cwd) =>
-      runCommand(spawner, {
-        executable: "git",
-        args: [...hermeticConfig, ...args],
-        cwd,
-        env: hermeticEnvironment,
-      }).pipe(Effect.mapError((error) => new GitFailed({ message: error.message })))
+      runGit(spawner, args, cwd).pipe(
+        Effect.mapError((error) => new GitFailed({ message: error.message })),
+      )
 
     return GitService.of({
       ensureClone: (pullRequest) =>
@@ -185,17 +182,6 @@ function worktree(git: RunGit, worktreesFolder: string, repositoryPath: string, 
 }
 
 // --- git settings ------------------------------------------------------------------
-
-// The user's global and system git config are ignored. Settings like
-// `diff.noprefix`, an external diff tool or a credential helper would
-// otherwise change what git prints, or make it prompt.
-const hermeticEnvironment = {
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_NOSYSTEM: "1",
-  GIT_TERMINAL_PROMPT: "0",
-}
-
-const hermeticConfig = ["-c", "core.quotePath=false", "-c", "advice.detachedHead=false"]
 
 // Cloning and fetching sign in through `gh`, so Proofroom never sees a token.
 const githubCredentials = ["-c", "credential.helper=!gh auth git-credential"]
