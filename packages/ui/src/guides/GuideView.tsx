@@ -5,6 +5,7 @@ import { useEffect, useMemo } from "react"
 import { AgentText } from "../components/AgentText.tsx"
 import { MermaidDiagram } from "../components/MermaidDiagram.tsx"
 import { StatusBadge } from "../components/StatusBadge.tsx"
+import { ReviewBar } from "../reviews/ReviewBar.tsx"
 import { ChapterView } from "./ChapterView.tsx"
 import { DiffView } from "./DiffView.tsx"
 import { RoutineChanges } from "./RoutineChanges.tsx"
@@ -41,8 +42,9 @@ function GuideContent({
       {tab === "guide" ? (
         <GuideBody guide={guide} hunks={hunks} />
       ) : (
-        <DiffView hunks={hunks} flags={allFlags} />
+        <DiffView guideId={guide.id} hunks={hunks} flags={allFlags} />
       )}
+      <ReviewBar guideId={guide.id} />
     </article>
   )
 }
@@ -112,6 +114,7 @@ function GuideBody({
       {guide.overviewDiagram !== null && <MermaidDiagram diagram={guide.overviewDiagram} />}
       {guide.chapters.map((chapter) => (
         <ChapterView
+          guideId={guide.id}
           key={chapter.key}
           chapter={chapter}
           placements={guide.placements.filter(
@@ -121,7 +124,7 @@ function GuideBody({
           hunksById={hunksById}
         />
       ))}
-      <RoutineChanges placements={guide.placements} hunksById={hunksById} />
+      <RoutineChanges guideId={guide.id} placements={guide.placements} hunksById={hunksById} />
     </>
   )
 }

@@ -1,12 +1,14 @@
-import type { AppendixKind, Hunk, HunkId, Placement } from "@proofroom/protocol"
+import type { AppendixKind, GuideId, Hunk, HunkId, Placement } from "@proofroom/protocol"
 import { HunkView } from "./HunkView.tsx"
 
 // The appendix: changes the reader can trust without reading, grouped by
 // kind. Each group is folded; the code is one click away.
 export function RoutineChanges({
+  guideId,
   placements,
   hunksById,
 }: {
+  readonly guideId: GuideId
   readonly placements: ReadonlyArray<Placement>
   readonly hunksById: ReadonlyMap<HunkId, Hunk>
 }) {
@@ -29,6 +31,7 @@ export function RoutineChanges({
               const hunk = hunksById.get(placement.hunkId)
               return hunk === undefined ? null : (
                 <HunkView
+                  guideId={guideId}
                   key={`${hunk.id}-${index}`}
                   hunk={hunk}
                   lines={placement.lines}

@@ -1,4 +1,4 @@
-import type { Chapter, Hunk, HunkId, Placement } from "@proofroom/protocol"
+import type { Chapter, GuideId, Hunk, HunkId, Placement } from "@proofroom/protocol"
 import { AgentText } from "../components/AgentText.tsx"
 import { MermaidDiagram } from "../components/MermaidDiagram.tsx"
 import { StatusBadge } from "../components/StatusBadge.tsx"
@@ -7,10 +7,12 @@ import { HunkView } from "./HunkView.tsx"
 // One chapter: its text and diagram once written, and the code placed in it.
 // While it waits to be written, the planner's one-line purpose stands in.
 export function ChapterView({
+  guideId,
   chapter,
   placements,
   hunksById,
 }: {
+  readonly guideId: GuideId
   readonly chapter: Chapter
   readonly placements: ReadonlyArray<Placement>
   readonly hunksById: ReadonlyMap<HunkId, Hunk>
@@ -34,7 +36,13 @@ export function ChapterView({
         if (hunk === undefined) return null
         const flags = chapter.flags.filter((flag) => flag.hunkId === hunk.id)
         return (
-          <HunkView key={`${hunk.id}-${index}`} hunk={hunk} lines={placement.lines} flags={flags} />
+          <HunkView
+            guideId={guideId}
+            key={`${hunk.id}-${index}`}
+            hunk={hunk}
+            lines={placement.lines}
+            flags={flags}
+          />
         )
       })}
     </section>
