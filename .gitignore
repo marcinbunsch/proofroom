@@ -1,2 +1,20 @@
 # Local checkout of Effect-TS/effect, for reference only (see BOOTSTRAP.md)
 /effect/
+
+node_modules
+dist
+*.tsbuildinfo
+*.tgz
+
+.env
+.env.*
+!.env.example
+
+# Local runtime state ($PROOFROOM_HOME defaults to ~/.proofroom, outside the
+# repo, but dev runs and tests are sometimes pointed inside it).
+*.db
+*.db-wal
+*.db-shm
+.proofroom/
+
+.DS_Store

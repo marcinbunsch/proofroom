@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+}
+
+/* Pele draws diagrams in the page's own colours and fonts. */
+:root {
+  --pele-bg: transparent;
+  --pele-fg: var(--color-stone-800);
+  --pele-border: var(--color-stone-300);
+  --pele-surface: var(--color-white);
+  --pele-surface-alt: var(--color-stone-100);
+  --pele-font: var(--font-sans);
+  --pele-font-mono: var(--font-mono);
+  --pele-radius: 6px;
+}
+
+/* Text the agents wrote, in Markdown. */
+.agent-text p {
+  margin-block: 0.75rem;
+  line-height: 1.65;
+}
+.agent-text ul,
+.agent-text ol {
+  margin-block: 0.75rem;
+  padding-left: 1.25rem;
+  list-style: disc;
+}
+.agent-text li {
+  margin-block: 0.25rem;
+}
+.agent-text code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  background: var(--color-stone-100);
+  border-radius: 4px;
+  padding: 0.1em 0.3em;
+}
+.agent-text strong {
+  font-weight: 600;
+}

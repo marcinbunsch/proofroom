@@ -1,0 +1,26 @@
+{
+  "name": "@proofroom/server",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch --env-file-if-exists=../../.env src/main.ts",
+    "start": "node --env-file-if-exists=../../.env src/main.ts",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "generate-guide": "node --env-file-if-exists=../../.env scripts/generate-guide.ts"
+  },
+  "dependencies": {
+    "@effect/platform-node": "4.0.5",
+    "@effect/sql-sqlite-node": "4.0.5",
+    "@proofroom/protocol": "workspace:*",
+    "effect": "4.0.5",
+    "pele": "1.7.0"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.0.5",
+    "@modelcontextprotocol/client": "2.3.1",
+    "vitest": "5.0.5"
+  }
+}

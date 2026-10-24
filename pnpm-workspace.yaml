@@ -1,0 +1,26 @@
+packages:
+  - "packages/*"
+
+# Pin exact versions on install: Effect 4 moves fast, and upgrades are planned
+# work. pnpm 11 reads this here only; in .npmrc it is silently ignored.
+saveExact: true
+
+# Supply-chain guard: never install a dependency version published less than this
+# many minutes ago (4320 = 3 days). A compromised release that is caught and
+# yanked within a few days never makes it into the lockfile. pnpm 11 also checks
+# every entry already in the lockfile on each install.
+minimumReleaseAge: 4320
+
+# Temporary exception, made by hand on 2026-10-24: @pierre/diffs 1.6.0 renders
+# every diff empty in a browser, and the fix (1.6.1, with the two releases it
+# depends on) was then under 3 days old. Pinned to those exact versions. All
+# three are 3 days old by 2026-10-24 18:05 UTC; remove this list after that.
+minimumReleaseAgeExclude:
+  - "@pierre/diffs@1.6.1"
+  - "@pierre/highlights@0.2.0"
+  - "@pierre/theming@1.0.2"
+
+# esbuild fetches its platform binary. SQLite is Node's built-in node:sqlite, so
+# there is no native addon to build.
+allowBuilds:
+  esbuild: true

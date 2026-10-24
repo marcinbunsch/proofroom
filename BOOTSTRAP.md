@@ -135,6 +135,11 @@ files.
 5. You choose Claude Code or Codex as the default in Settings, plus a model
    if the tool has a choice. You can switch for a single guide from the
    Generate button. Each guide records which tool and model wrote it.
+6. You choose which account each tool runs as, per repository, in Settings:
+   for example a work Claude account for work repositories and a personal one
+   for your own. An account is the tool's config folder (`CLAUDE_CONFIG_DIR`
+   for Claude Code, `CODEX_HOME` for Codex). Until Settings exists, the two
+   environment variables set it for every repository.
 
 ### Changes since your last review
 
@@ -201,9 +206,11 @@ These are the basics any review tool needs.
 - **Which repositories.** Only the ones you list in Settings. Nothing outside
   that list shows up.
 - **Comments.** You can comment on a line, on a file, or on the pull request
-  as a whole. Comments wait in a draft review until you submit them all
-  together, with a summary and a verdict. The author gets one notification
-  with everything. Replies to existing threads can post right away.
+  as a whole. Comments wait as drafts, saved in Proofroom only, until you
+  submit them all together with a summary and a verdict, in one call to
+  GitHub. The author gets one notification with everything. Drafts are not
+  mirrored to a GitHub pending review, so a review started in Proofroom is
+  finished in Proofroom. Replies to existing threads can post right away.
 - **Existing threads.** Other people's comment threads show next to the code,
   in both the guide and the Diff tab. You can reply, resolve and unresolve.
 - **Reviewers and labels.** You can change them.
@@ -264,11 +271,12 @@ Then, in this order:
 ### How a guide gets written
 
 1. The app runs `git diff` itself and splits the change into hunks. Each hunk
-   gets a stable ID made from its file, its position and a hash of its
-   content.
+   gets a stable ID made from its file and a hash of its content.
 2. The app makes a `git worktree` at the pull request's exact latest commit,
    from its own clone in `~/.proofroom/repos`. Your own checkouts are never
-   touched. The worktree is deleted when the run ends.
+   touched. The planner and the chapter runs of one guide share this
+   worktree, since none of them can write to it. It is deleted when the
+   guide is finished.
 3. It starts the **planner run**: `claude` or `codex`, without a terminal,
    inside that worktree.
 4. The planner reads the code and writes back through Proofroom's **MCP
@@ -293,8 +301,54 @@ Codex's read-only sandbox). So a run never stops to ask permission. The MCP
 server listens on the laptop only and needs a secret that is new for every
 run.
 
-**The prompts** live in `packages/server/src/prompts/` as plain files kept in
-the repo.
+**Tested on 2026-10-23** (Claude Code 2.1.280, Codex 0.153.0). Both CLIs
+called Proofroom's MCP tools over HTTP. Both refused, without a prompt, an
+attempt to write a file and an attempt to reach the network. These are the
+settings that made it work:
+
+- **Claude Code:** `claude -p`, plus:
+  - `--mcp-config <file>` and `--strict-mcp-config`: only Proofroom's MCP
+    server is loaded.
+  - `--setting-sources ""`: the user's own settings, hooks and allow-lists
+    are left out.
+  - `--tools "Read,Grep,Glob,Bash"`.
+  - `--allowedTools` listing the Proofroom MCP tools and the read-only
+    commands, e.g. `"Bash(git log:*)"`.
+  - `--permission-mode dontAsk` and `--permission-prompts none`: anything
+    not allowed is refused, never asked about.
+  - `--no-session-persistence --output-format stream-json`.
+  - `--bare` can't be used: it only accepts API keys, and we rely on the
+    user's own login.
+  - `CLAUDE_CONFIG_DIR` is passed on when set in Proofroom's environment, so
+    guides can run as another account.
+- **Codex:** `codex exec`, plus:
+  - `--json --ephemeral --ignore-user-config --ignore-rules -s read-only`.
+  - `-c approval_policy="never"`.
+  - `-c mcp_servers.proofroom.url=...` and
+    `-c mcp_servers.proofroom.default_tools_approval_mode="approve"`.
+    Without the second one, every MCP call is refused.
+  - `-c web_search="disabled"`, and `features.memories`, `features.hooks`,
+    `features.plugins`, `features.apps` all set to false.
+  - `HOME` pointed at an empty folder, with `CODEX_HOME` still pointing at
+    the real `~/.codex` so the user's login works. `CODEX_HOME` set in
+    Proofroom's environment picks another account instead. Without this, Codex
+    loads the user's personal skills from `~/.agents/skills` even with
+    `--ignore-user-config`.
+
+Still to close before release:
+
+- `git diff --output=<file>` and `git log --output=<file>` write files, so
+  allowing a git command by name is not the same as allowing it to only
+  read. Claude Code's sandbox setting (which blocks file writes and network
+  at the operating-system level) would close this. Codex's read-only sandbox
+  already does.
+- Codex still lists its own built-in skills. Turn them off one by one with
+  `skills.config`.
+
+**The prompts** are TypeScript functions next to the runs that use them
+(`guides/planning/planner-prompt.ts`, `guides/chapters/chapter-prompt.ts`).
+Each prompt is built from the pull request's data, such as the list of hunks
+and the outline, and a function keeps the text and that data in one place.
 
 ### Changes since your last review
 
@@ -329,8 +383,7 @@ Effect's Migrator.
 
 `@pierre/diffs` draws all code, both the hunks inside chapters and the Diff
 tab, so they look identical. Syntax colouring uses `@pierre/highlights`
-(`preferredHighlighter: 'highlights'`). Shiki stays as the fallback that
-ships inside `@pierre/diffs`.
+(`preferredHighlighter: 'highlights'`).
 
 ### Visualization plugins
 
@@ -343,15 +396,20 @@ ships inside `@pierre/diffs`.
    the same format. The Mermaid ones are drawn by Pele.
 4. A plugin the AI proposes is unreviewed code. It only ever renders inside a
    sandboxed iframe until you approve it.
+5. The server draws every Mermaid diagram with Pele the moment the MCP call
+   arrives. AI-written Mermaid often breaks on small things, such as
+   brackets inside a label that aren't in quotes. Pele reports the line,
+   column and a snippet, and that goes straight back to the agent as the
+   tool's error so it can fix it. A broken diagram never reaches the guide.
 
 ### The workspace
 
-| Package | What it is |
-| --- | --- |
-| `packages/protocol` | Schemas, RPC procedure definitions, MCP tool definitions. No logic. Shared by server and UI. |
-| `packages/server` | Everything that does work, each part an Effect Layer: GitHub, repository copies, the agent runner, the MCP server, storage, the RPC handlers. |
-| `packages/ui` | React screens, atoms, the RPC client, the built-in visualizations. |
-| `packages/desktop` | The Electron shell: window, notifications, start at login, updates. |
+| Package             | What it is                                                                                                                                    |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/protocol` | Schemas, RPC procedure definitions, MCP tool definitions. No logic. Shared by server and UI.                                                  |
+| `packages/server`   | Everything that does work, each part an Effect Layer: GitHub, repository copies, the agent runner, the MCP server, storage, the RPC handlers. |
+| `packages/ui`       | React screens, atoms, the RPC client, the built-in visualizations.                                                                            |
+| `packages/desktop`  | The Electron shell: window, notifications, start at login, updates.                                                                           |
 
 Staffroom's `client` package has no equivalent here: the RPC client comes
 straight from the shared definitions in `protocol`.
@@ -389,31 +447,32 @@ straight from the shared definitions in `protocol`.
 
 ### Versions
 
-Exact pins (`save-exact=true`) and pnpm's `minimumReleaseAge: 4320` (3 days:
-a new release must be 3 days old before it can be installed). Both come from
-Staffroom. Upgrades are planned work, not something done in passing.
+Exact pins (`saveExact: true`) and pnpm's `minimumReleaseAge: 4320` (3 days:
+a new release must be 3 days old before it can be installed), both in
+`pnpm-workspace.yaml`. Both come from Staffroom. Upgrades are planned work,
+not something done in passing.
 
 New pieces are pinned to the newest version that clears the 3-day rule
 **on the day they are installed**. As of 2026-10-23:
 
-| Layer | Choice | Version |
-| --- | --- | --- |
-| Runtime | Node | 26+ (engines-pinned) |
-| Package manager | pnpm workspace | 10.14.0 |
-| Language | TypeScript, native ESM, strict | 7.0.2 |
-| Everything Effect | `effect` (Schema, RPC, SQL, child processes, MCP server, atoms) | 4.0.5 (4.0.6 clears on 2026-10-25) |
-| Node runtime for Effect | `@effect/platform-node` | 4.0.5 |
-| Storage | `@effect/sql-sqlite-node` | 4.0.5 |
-| UI state | `@effect/atom-react` | 4.0.5 |
-| UI | React 19 + react-router 7 + Tailwind 4 (vite) | Staffroom's pins |
-| Code display | `@pierre/diffs` + `@pierre/highlights` | 1.6.1 + 0.2.0 (clear on 2026-10-24) |
-| Diagrams | `pele` | 1.7.0 |
-| Plugin bundling | esbuild | 0.28.2 |
-| Desktop | Electron | 44.0.0 (Staffroom's) |
-| Updates | `update-electron-app` | 3.3.0 |
-| Build | vite | 8.2.2 |
-| Tests | vitest + `@effect/vitest` | 5.0.5 + 4.0.5 |
-| Lint / format | oxlint / oxfmt | 1.80.0 / 0.65.0 |
+| Layer                   | Choice                                                          | Version                            |
+| ----------------------- | --------------------------------------------------------------- | ---------------------------------- |
+| Runtime                 | Node                                                            | 26+ (engines-pinned)               |
+| Package manager         | pnpm workspace                                                  | 11.28.6                            |
+| Language                | TypeScript, native ESM, strict                                  | 7.0.2                              |
+| Everything Effect       | `effect` (Schema, RPC, SQL, child processes, MCP server, atoms) | 4.0.5 (4.0.6 clears on 2026-10-25) |
+| Node runtime for Effect | `@effect/platform-node`                                         | 4.0.5                              |
+| Storage                 | `@effect/sql-sqlite-node`                                       | 4.0.5                              |
+| UI state                | `@effect/atom-react`                                            | 4.0.5                              |
+| UI                      | React 19 + react-router 7 + Tailwind 4 (vite)                   | Staffroom's pins                   |
+| Code display            | `@pierre/diffs` + `@pierre/highlights`                          | 1.6.1 + 0.2.0                      |
+| Diagrams                | `pele`                                                          | 1.7.0                              |
+| Plugin bundling         | esbuild                                                         | 0.28.2                             |
+| Desktop                 | Electron                                                        | 44.0.0 (Staffroom's)               |
+| Updates                 | `update-electron-app`                                           | 3.3.0                              |
+| Build                   | vite                                                            | 8.2.2                              |
+| Tests                   | vitest + `@effect/vitest`                                       | 5.0.5 + 4.0.5                      |
+| Lint / format           | oxlint / oxfmt                                                  | 1.80.0 / 0.65.0                    |
 
 Gone compared to Staffroom: zod (Effect Schema), Hono (Effect RPC), kysely and
 better-sqlite3 (Effect SQL), MobX (atoms), better-auth (no accounts), Flue
@@ -442,7 +501,7 @@ Each step leaves `pnpm check` passing.
    `claude`/`codex`.
 6. **The inbox.** The GraphQL query, the three sections, the repository list
    in Settings, notifications.
-7. **Hunks and repository copies.** The app's own clone, worktrees per run,
+7. **Hunks and repository copies.** The app's own clone, a worktree per guide,
    the diff split into hunks with stable IDs, and the coverage check. All of
    it tested against real fixture repositories.
 8. **The agent runner and MCP server.** The fake runner and its scripts come
@@ -486,6 +545,38 @@ permission prompts along the way:
 5. Vite `?raw` imports need an ambient `declare module` in **every** package
    whose type-check compiles the importing file, not just the owner.
 
+### Found in the spike
+
+- **`@pierre/diffs` 1.6.0 can't load its themes in a browser.** Its code calls
+  a `@pierre/theming` feature that only exists in theming 1.0.2, but it pins
+  theming 1.0.1, so every diff renders empty, without an error. 1.6.1 (with
+  theming 1.0.2 and `@pierre/highlights` 0.2.0) fixes it. Until 1.6.1 clears
+  the 3-day rule, Proofroom used 1.5.2 with Shiki highlighting. On
+  2026-10-24 Marcin chose to take 1.6.1 early, through a
+  `minimumReleaseAgeExclude` list in `pnpm-workspace.yaml` pinned to exactly
+  those three versions. **Remove that list after 2026-10-24 18:05 UTC**, when
+  all three are 3 days old.
+- **pnpm 10.14.0 silently ignores `minimumReleaseAge`.** Staffroom pins that
+  version, so its 3-day rule has never been active. With it, Proofroom
+  installed a release of `@modelcontextprotocol/client` that was four hours
+  old. The lockfile was re-resolved under a pnpm that enforces the rule, and
+  Proofroom is now on pnpm 11. pnpm 11 also re-checks every lockfile entry on
+  each install ("Lockfile passes supply-chain policies"). When bumping pnpm,
+  check the rule still holds: `pnpm add effect@<a release from today>` must
+  fail with `ERR_PNPM_NO_MATURE_MATCHING_VERSION`.
+- **pnpm 11 ignores `save-exact` in `.npmrc`**, without a warning, and saves
+  ranges like `^7.0.0` again. The setting lives in `pnpm-workspace.yaml` as
+  `saveExact: true`.
+- The app never makes commits: its git work is clone, fetch, worktree,
+  diff and merge-base. Only the tests do, when they build fixture
+  repositories. A developer's global git config may sign every commit with
+  gpg, so the test helpers pass `-c commit.gpgsign=false`, or the commit
+  fails.
+- `@pierre/diffs` draws a single hunk when given a patch that holds just the
+  file header and that one `@@` section. Its `lineAnnotations` and
+  `renderAnnotation` put comments and flags under any line. So chapters can
+  show one hunk, or part of one, using the same component as the Diff tab.
+
 ### Effect-specific
 
 - When unsure how Effect works, read its source instead of guessing. A
@@ -498,3 +589,9 @@ permission prompts along the way:
   `@effect/atom-react`. The older `@effect-atom/*` packages are still on
   Effect 3 and won't work with it.
 - `@effect/vitest` 4 needs vitest 5, not Staffroom's vitest 4.
+- The MCP server is `McpServer.layerHttp` with
+  `protocols: [McpProtocol.v2025_06_18, McpProtocol.v2025_03_26]`, mounted
+  with `HttpRouter.serve` on `NodeHttpServer.layer`. Tools are
+  `Tool.make` + `Toolkit.make`, with handlers from `toolkit.toLayer`, and
+  their parameters are checked against their Schema before the handler
+  runs. Read `effect/packages/effect/MCP.md`.
