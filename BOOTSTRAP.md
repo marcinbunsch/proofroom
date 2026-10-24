@@ -172,8 +172,17 @@ were written for you.
 3. Diagrams are written in Mermaid, a simple text format for diagrams. The
    app draws them with Pele (https://pele.run), using the app's own colours
    and fonts.
-4. Other types are drawn by the app's own code: before/after comparisons,
-   pieces of code, a map of which files changed how much.
+4. Other types are drawn by the app's own code. The first ones:
+   - **Behaviour change:** cases where the code now does something
+     different, each with what used to happen and what happens now.
+   - **API change:** what callers see (functions, endpoints, config keys,
+     types), each as it was and as it is.
+   - **Flow:** a path through the code with what was added, changed or
+     removed marked on it. A node can name its file; clicking it opens the
+     file on the Diff tab. The app writes the Mermaid for it, so nothing the
+     AI wrote becomes Mermaid syntax.
+5. A chapter has up to three visuals and at most 150 words of text. The
+   structure of a change goes in visuals, which read faster than prose.
 
 ### Adding new types
 
@@ -398,8 +407,11 @@ tab, so they look identical. Syntax colouring uses `@pierre/highlights`
    this" note for the AI, and a React component.
 2. The app bundles plugins with esbuild when it starts and whenever the
    folder changes. No new release needed.
-3. The built-in types live in `packages/ui/src/visualizations/` in exactly
-   the same format. The Mermaid ones are drawn by Pele.
+3. For now the built-in types are split three ways: their data in
+   `packages/protocol/src/visuals.ts`, the server's checks in
+   `packages/server/src/guides/visuals.ts`, and their drawing in
+   `packages/ui/src/visuals/`. They move into the plugin format when it
+   exists. The Mermaid ones are drawn by Pele.
 4. A plugin the AI proposes is unreviewed code. It only ever renders inside a
    sandboxed iframe until you approve it.
 5. The server draws every Mermaid diagram with Pele the moment the MCP call

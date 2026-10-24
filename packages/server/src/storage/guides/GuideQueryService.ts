@@ -10,6 +10,7 @@ import { SqlClient } from "effect/sql"
 import {
   ChapterRow,
   ExcerptRow,
+  VisualRow,
   FlagRow,
   GuideRow,
   GuideSummaryRow,
@@ -69,7 +70,11 @@ function selectGuide(sql: SqlClient.SqlClient, guideId: GuideId) {
       yield* sql`SELECT * FROM placements WHERE guideId = ${guideId} ORDER BY rowid`.pipe(
         Effect.flatMap(decodePlacementRows),
       )
-    // rowid order is the order the chapter writer chose excerpts in.
+    // rowid order is the order the chapter writer added visuals and excerpts in.
+    const visuals =
+      yield* sql`SELECT * FROM visuals WHERE guideId = ${guideId} ORDER BY rowid`.pipe(
+        Effect.flatMap(decodeVisualRows),
+      )
     const excerpts =
       yield* sql`SELECT * FROM excerpts WHERE guideId = ${guideId} ORDER BY rowid`.pipe(
         Effect.flatMap(decodeExcerptRows),
@@ -77,7 +82,7 @@ function selectGuide(sql: SqlClient.SqlClient, guideId: GuideId) {
     const flags = yield* sql`SELECT * FROM flags WHERE guideId = ${guideId} ORDER BY rowid`.pipe(
       Effect.flatMap(decodeFlagRows),
     )
-    return toGuide({ guide, chapters, placements, excerpts, flags })
+    return toGuide({ guide, chapters, placements, visuals, excerpts, flags })
   }).pipe(Effect.catchTags({ SqlError: Effect.die, SchemaError: Effect.die }))
 }
 
@@ -108,6 +113,7 @@ function selectHunks(sql: SqlClient.SqlClient, guideId: GuideId) {
 const decodeGuideRows = Schema.decodeUnknownEffect(Schema.Array(GuideRow))
 const decodeChapterRows = Schema.decodeUnknownEffect(Schema.Array(ChapterRow))
 const decodePlacementRows = Schema.decodeUnknownEffect(Schema.Array(PlacementRow))
+const decodeVisualRows = Schema.decodeUnknownEffect(Schema.Array(VisualRow))
 const decodeExcerptRows = Schema.decodeUnknownEffect(Schema.Array(ExcerptRow))
 const decodeFlagRows = Schema.decodeUnknownEffect(Schema.Array(FlagRow))
 const decodeHunkRows = Schema.decodeUnknownEffect(Schema.Array(HunkRow))

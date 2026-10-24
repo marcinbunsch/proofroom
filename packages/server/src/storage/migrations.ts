@@ -108,4 +108,26 @@ const migrations = SqliteMigrator.fromRecord({
     const sql = yield* SqlClient.SqlClient
     yield* sql`ALTER TABLE guides ADD COLUMN writerPid INTEGER`
   }),
+  // A chapter shows a list of visuals instead of one diagram. Diagrams already
+  // written become the first visual of their chapter.
+  "0005_visuals": Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    yield* sql`
+      CREATE TABLE visuals (
+        guideId TEXT NOT NULL,
+        chapterKey TEXT NOT NULL,
+        visual TEXT NOT NULL
+      )
+    `
+    yield* sql`
+      INSERT INTO visuals (guideId, chapterKey, visual)
+      SELECT guideId, key, json_object(
+        '_tag', 'diagram',
+        'source', json_extract(diagram, '$.source'),
+        'caption', json_extract(diagram, '$.caption')
+      )
+      FROM chapters WHERE diagram IS NOT NULL
+    `
+    yield* sql`ALTER TABLE chapters DROP COLUMN diagram`
+  }),
 })

@@ -1,7 +1,8 @@
 import { Schema } from "effect"
 import { Tool, Toolkit } from "effect/ai"
-import { ChapterKey, FlagKind, MermaidDiagram, Placement } from "./guide.ts"
+import { ChapterKey, FlagKind, Placement } from "./guide.ts"
 import { HunkId, HunkLineRange } from "./hunk.ts"
+import { MermaidDiagram, Visual } from "./visuals.ts"
 
 // The tools a CLI agent uses to hand a guide back to Proofroom, over MCP. Every
 // call is checked against its schema before the handler runs. A handler that
@@ -81,11 +82,22 @@ export const PlannerToolkit = Toolkit.make(
 
 export const WriteChapter = Tool.make("write_chapter", {
   description:
-    "Write this chapter: a short explanation in Markdown, and optionally one Mermaid diagram. A second call replaces the first.",
-  parameters: Schema.Struct({
-    body: Schema.String,
-    diagram: Schema.NullOr(MermaidDiagram),
-  }),
+    "Write this chapter's text: a short explanation in Markdown, at most 150 words. Say what changed and why it matters; leave the structure (cases, signatures, flows) to add_visual. A second call replaces the first.",
+  parameters: Schema.Struct({ body: Schema.String }),
+  success: Confirmation,
+  failure: ToolRejected,
+})
+
+export const AddVisual = Tool.make("add_visual", {
+  description: [
+    "Add a visual to this chapter; Proofroom draws it from the data you give. Up to 3 per chapter, shown in the order added. Pick the kind that fits:",
+    "- behaviourChange: cases where the code now behaves differently, each with the situation, what happened before and what happens now. Best for hidden behaviour changes. 1 to 8 cases.",
+    "- apiChange: signatures, endpoints, config keys or types callers see, each as before and after (before null if added, after null if removed), with an optional note on what callers must do. 1 to 12 entries.",
+    "- flow: a path through the code (a request, an event, the data) with each node and edge marked added, changed, removed or unchanged. Give a node the file it lives in as `path` (one of this chapter's files) so the reader can open it. 2 to 15 nodes; edges name nodes by your ids.",
+    "- diagram: free Mermaid with a caption, only when none of the above fits.",
+    "Keep labels short: a few words or one signature.",
+  ].join("\n"),
+  parameters: Schema.Struct({ visual: Visual }),
   success: Confirmation,
   failure: ToolRejected,
 })
@@ -122,7 +134,13 @@ export const FinishChapter = Tool.make("finish_chapter", {
   failure: ToolRejected,
 })
 
-export const ChapterToolkit = Toolkit.make(WriteChapter, ShowCode, AddFlag, FinishChapter)
+export const ChapterToolkit = Toolkit.make(
+  WriteChapter,
+  AddVisual,
+  ShowCode,
+  AddFlag,
+  FinishChapter,
+)
 
 // --- both runs: the code's history ----------------------------------------------
 

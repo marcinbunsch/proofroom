@@ -10,11 +10,12 @@ import {
   type MermaidDiagram,
   type Placement,
   type PullRequestRef,
+  type Visual,
 } from "@proofroom/protocol"
 import { Context, DateTime, Effect, Layer, Schema } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 import { GuideSubscriptionService } from "./GuideSubscriptionService.ts"
-import { ChapterRow, ExcerptRow, FlagRow, GuideRow, HunkRow, PlacementRow } from "./rows.ts"
+import { ExcerptRow, FlagRow, GuideRow, HunkRow, PlacementRow, VisualRow } from "./rows.ts"
 
 // Every change to a guide, one write per function: the mutations, in GraphQL
 // terms. GuideQueryService holds the reads.
@@ -52,6 +53,11 @@ export interface GuideMutations {
     guideId: GuideId,
     chapterKey: ChapterKey,
     text: ChapterText,
+  ) => Effect.Effect<void>
+  readonly addVisual: (
+    guideId: GuideId,
+    chapterKey: ChapterKey,
+    visual: Visual,
   ) => Effect.Effect<void>
   readonly addExcerpt: (
     guideId: GuideId,
@@ -94,7 +100,6 @@ export interface NewChapter {
 
 export interface ChapterText {
   readonly body: string
-  readonly diagram: MermaidDiagram | null
 }
 
 export class GuideMutationService extends Context.Service<GuideMutationService, GuideMutations>()(
@@ -132,6 +137,8 @@ function makeGuideMutationService() {
         updateChapterStatus(sql, guideId, chapterKey, status, failure).pipe(thenAnnounce(guideId)),
       writeChapter: (guideId, chapterKey, text) =>
         updateChapterText(sql, guideId, chapterKey, text).pipe(thenAnnounce(guideId)),
+      addVisual: (guideId, chapterKey, visual) =>
+        insertVisual(sql, guideId, chapterKey, visual).pipe(thenAnnounce(guideId)),
       addExcerpt: (guideId, chapterKey, excerpt) =>
         insertExcerpt(sql, guideId, chapterKey, excerpt).pipe(thenAnnounce(guideId)),
       addFlag: (guideId, chapterKey, flag) =>
@@ -198,6 +205,7 @@ function deleteGuideAndItsRows(sql: SqlClient.SqlClient, guideId: GuideId) {
 
 const guideOwnedTables = [
   "draftComments",
+  "visuals",
   "excerpts",
   "flags",
   "placements",
@@ -304,11 +312,20 @@ function updateChapterText(
   chapterKey: ChapterKey,
   text: ChapterText,
 ) {
-  const diagram = encodeDiagram(text.diagram)
   return sql`
-    UPDATE chapters SET body = ${text.body}, diagram = ${diagram}
+    UPDATE chapters SET body = ${text.body}
     WHERE guideId = ${guideId} AND key = ${chapterKey}
   `
+}
+
+function insertVisual(
+  sql: SqlClient.SqlClient,
+  guideId: GuideId,
+  chapterKey: ChapterKey,
+  visual: Visual,
+) {
+  const row = encodeVisualRow({ chapterKey, visual })
+  return sql`INSERT INTO visuals ${sql.insert({ guideId, ...row })}`
 }
 
 function insertExcerpt(
@@ -336,6 +353,7 @@ function insertFlag(
 const encodeGuideRow = Schema.encodeSync(GuideRow)
 const encodeHunkRow = Schema.encodeSync(HunkRow)
 const encodePlacementRow = Schema.encodeSync(PlacementRow)
+const encodeVisualRow = Schema.encodeSync(VisualRow)
 const encodeExcerptRow = Schema.encodeSync(ExcerptRow)
 const encodeFlagRow = Schema.encodeSync(FlagRow)
-const encodeDiagram = Schema.encodeSync(ChapterRow.fields.diagram)
+const encodeDiagram = Schema.encodeSync(GuideRow.fields.overviewDiagram)

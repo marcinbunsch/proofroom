@@ -1,5 +1,6 @@
 import { Schema } from "effect"
 import { HunkId, HunkLineRange } from "./hunk.ts"
+import { MermaidDiagram, Visual } from "./visuals.ts"
 
 export const GuideId = Schema.String.pipe(Schema.brand("GuideId"))
 export type GuideId = typeof GuideId.Type
@@ -41,12 +42,6 @@ export const Placement = Schema.Struct({
 })
 export type Placement = typeof Placement.Type
 
-export const MermaidDiagram = Schema.Struct({
-  source: Schema.String,
-  caption: Schema.String,
-})
-export type MermaidDiagram = typeof MermaidDiagram.Type
-
 export const FlagKind = Schema.Literals([
   "risky-logic",
   "hidden-behaviour-change",
@@ -87,8 +82,8 @@ export const Chapter = Schema.Struct({
   purpose: Schema.String,
   status: ChapterStatus,
   body: Schema.NullOr(Schema.String),
-  diagram: Schema.NullOr(MermaidDiagram),
-  // In the order the writer chose them.
+  // Each kind of list is in the order the writer added to it.
+  visuals: Schema.Array(Visual),
   excerpts: Schema.Array(Excerpt),
   flags: Schema.Array(Flag),
   failure: Schema.NullOr(Schema.String),

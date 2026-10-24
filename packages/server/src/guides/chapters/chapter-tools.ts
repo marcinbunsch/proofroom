@@ -2,6 +2,7 @@ import {
   ChapterToolkit,
   ToolRejected,
   type AddFlag,
+  type AddVisual,
   type ChapterKey,
   type GuideId,
   type Hunk,
@@ -14,7 +15,7 @@ import { Deferred, Effect, Semaphore } from "effect"
 import type { Tool } from "effect/ai"
 import { GuideMutationService } from "../../storage/guides/GuideMutationService.ts"
 import { GuideQueryService } from "../../storage/guides/GuideQueryService.ts"
-import { checkDiagram } from "../diagrams.ts"
+import { checkVisual } from "../visuals.ts"
 import type { PlacedHunk } from "./chapter-prompt.ts"
 
 // The tools for writing one chapter. As with the planner's tools, every call
@@ -45,6 +46,7 @@ export function chapterToolHandlers(run: ChapterRun) {
       const oneAtATime = (yield* Semaphore.make(1)).withPermit
       return {
         write_chapter: (parameters) => oneAtATime(writeChapter(context, parameters)),
+        add_visual: (parameters) => oneAtATime(addVisual(context, parameters)),
         show_code: (parameters) => oneAtATime(showCode(context, parameters)),
         add_flag: (parameters) => oneAtATime(addFlag(context, parameters)),
         finish_chapter: () => oneAtATime(finishChapter(context)),
@@ -62,19 +64,34 @@ interface ChapterContext {
 
 // --- the tools ---------------------------------------------------------------------
 
-function writeChapter(
-  context: ChapterContext,
-  { body, diagram }: Tool.Parameters<typeof WriteChapter>,
-) {
+// The text says what changed and why it matters; cases, signatures and flows
+// go in visuals, where they read faster than prose.
+function writeChapter(context: ChapterContext, { body }: Tool.Parameters<typeof WriteChapter>) {
   return Effect.gen(function* () {
-    if (body.trim() === "")
-      return yield* new ToolRejected({ message: "The chapter text is empty." })
-    yield* checkDiagram(diagram)
-    yield* context.mutations.writeChapter(context.run.guideId, context.run.chapterKey, {
-      body,
-      diagram,
-    })
+    const wordCount = countWords(body)
+    if (wordCount === 0) return yield* new ToolRejected({ message: "The chapter text is empty." })
+    if (wordCount > maxChapterWords) {
+      return yield* new ToolRejected({
+        message: `The chapter text is ${wordCount} words; keep it to ${maxChapterWords}. Move cases, signatures and flows into add_visual, and leave out what the excerpts show.`,
+      })
+    }
+    yield* context.mutations.writeChapter(context.run.guideId, context.run.chapterKey, { body })
     return "Chapter saved."
+  })
+}
+
+function addVisual(context: ChapterContext, { visual }: Tool.Parameters<typeof AddVisual>) {
+  return Effect.gen(function* () {
+    const chapterPaths = new Set(context.run.placedHunks.map(({ hunk }) => hunk.path))
+    yield* checkVisual(visual, chapterPaths)
+    const chapter = yield* loadChapter(context)
+    if (chapter.visuals.length >= maxVisualsPerChapter) {
+      return yield* new ToolRejected({
+        message: `This chapter already has ${maxVisualsPerChapter} visuals, the most it may. Keep the ones that show the most.`,
+      })
+    }
+    yield* context.mutations.addVisual(context.run.guideId, context.run.chapterKey, visual)
+    return "Visual saved."
   })
 }
 
@@ -148,6 +165,16 @@ function finishChapter(context: ChapterContext) {
     yield* Deferred.succeed(context.run.chapterFinished, undefined)
     return "Chapter finished. You are done; stop now."
   })
+}
+
+// 150 words: a few sentences on what changed and why it matters. A chapter that
+// needs more is either two chapters or has structure a visual shows better.
+const maxChapterWords = 150
+// 3 visuals: one per thing worth seeing, not a gallery.
+const maxVisualsPerChapter = 3
+
+function countWords(text: string): number {
+  return text.split(/\s+/).filter((word) => word !== "").length
 }
 
 // 3 excerpts of up to 15 lines: enough to show the heart of a change or the

@@ -25,6 +25,7 @@ import {
   overview,
   placeIn,
   roundingExcerpt,
+  roundingVisual,
 } from "./fixtures/scripted-agents.ts"
 import { makeTestServerLayer } from "./fixtures/test-server.ts"
 import { realProcessesTimeout } from "./fixtures/timeouts.ts"
@@ -87,6 +88,7 @@ describe("GuideGenerationService", realProcessesTimeout, () => {
           guide.chapters[0]?.excerpts.map(({ lines, why }) => ({ lines, why })),
           [roundingExcerpt],
         )
+        assert.deepStrictEqual(guide.chapters[0]?.visuals, [roundingVisual])
         assert.deepStrictEqual(checkCoverage(hunks, guide.placements), [])
       }),
   )
@@ -234,9 +236,7 @@ describe("GuideGenerationService", realProcessesTimeout, () => {
             yield* expectAccepted(showLines(5, 5))
             const fourth = yield* showLines(1, 5)
             yield* Ref.set(replies, [fromOtherChapter, fourth])
-            yield* expectAccepted(
-              agent.callTool("write_chapter", { body: "Discounts.", diagram: null }),
-            )
+            yield* expectAccepted(agent.callTool("write_chapter", { body: "Discounts." }))
             yield* expectAccepted(agent.callTool("finish_chapter", {}))
             return "Chapter finished."
           })
@@ -350,9 +350,7 @@ describe("GuideGenerationService", realProcessesTimeout, () => {
           if (chapterTitleIn(run.prompt) !== discountsChapter.title)
             return yield* chapterWriter(agent, run)
           const totalHunkId = hunkIdsByPath(run.prompt).get("src/cart/total.ts")
-          yield* expectAccepted(
-            agent.callTool("write_chapter", { body: "Discounts.", diagram: null }),
-          )
+          yield* expectAccepted(agent.callTool("write_chapter", { body: "Discounts." }))
           const flagOnCoupons = yield* agent.callTool("add_flag", {
             hunkId: totalHunkId,
             line: 5,
@@ -397,7 +395,7 @@ describe("GuideGenerationService", realProcessesTimeout, () => {
       const quittingWriter: AgentScript = (agent, run) =>
         chapterTitleIn(run.prompt) === couponsChapter.title
           ? agent
-              .callTool("write_chapter", { body: "Coupons.", diagram: null })
+              .callTool("write_chapter", { body: "Coupons." })
               .pipe(Effect.as("Written, I think."))
           : chapterWriter(agent, run)
 
@@ -462,5 +460,53 @@ describe("GuideGenerationService", realProcessesTimeout, () => {
         ),
       )
     }),
+  )
+
+  it.effect(
+    "chapter text over 150 words, a broken flow, a fourth visual -> each refused, saying what to fix",
+    () =>
+      Effect.gen(function* () {
+        const replies = yield* Ref.make<Array<ToolReply>>([])
+        const wordyWriter: AgentScript = (agent, run) =>
+          Effect.gen(function* () {
+            if (chapterTitleIn(run.prompt) !== discountsChapter.title)
+              return yield* chapterWriter(agent, run)
+            const longText = yield* agent.callTool("write_chapter", {
+              body: Array.from({ length: 151 }, () => "word").join(" "),
+            })
+            const brokenFlow = yield* agent.callTool("add_visual", {
+              visual: {
+                _tag: "flow",
+                title: "Where totals come from",
+                direction: "across",
+                nodes: [
+                  { id: "cart", label: "Cart", change: "unchanged", path: null },
+                  { id: "total", label: "cartTotal", change: "changed", path: "src/elsewhere.ts" },
+                ],
+                edges: [{ from: "cart", to: "checkout", label: null, change: "added" }],
+              },
+            })
+            for (const _ of [1, 2, 3]) {
+              yield* expectAccepted(agent.callTool("add_visual", { visual: roundingVisual }))
+            }
+            const fourthVisual = yield* agent.callTool("add_visual", { visual: roundingVisual })
+            yield* Ref.set(replies, [longText, brokenFlow, fourthVisual])
+            yield* expectAccepted(agent.callTool("write_chapter", { body: "Discounts." }))
+            yield* expectAccepted(agent.callTool("finish_chapter", {}))
+            return "Chapter finished."
+          })
+
+        const { guide } = yield* generateGuide({ planner: completePlanner, chapter: wordyWriter })
+        const [longText, brokenFlow, fourthVisual] = yield* Ref.get(replies)
+
+        assert.include(longText?.text, "151 words; keep it to 150")
+        assert.include(brokenFlow?.text, 'names "checkout", which is not one of the nodes')
+        assert.include(
+          brokenFlow?.text,
+          "src/elsewhere.ts, which isn't one of this chapter's files",
+        )
+        assert.include(fourthVisual?.text, "already has 3 visuals")
+        assert.strictEqual(guide.chapters[0]?.visuals.length, 3)
+      }),
   )
 })
