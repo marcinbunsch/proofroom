@@ -435,4 +435,32 @@ describe("GuideGenerationService", realProcessesTimeout, () => {
       assert.isTrue(yield* Deferred.isDone(plannerStopped))
     }),
   )
+
+  it.effect("guide deleted while being written -> its agent is stopped and the guide is gone", () =>
+    Effect.gen(function* () {
+      const plannerStarted = yield* Deferred.make<void>()
+      const plannerStopped = yield* Deferred.make<void>()
+      const endlessPlanner: AgentScript = () =>
+        Deferred.succeed(plannerStarted, undefined).pipe(
+          Effect.andThen(Effect.never),
+          Effect.onInterrupt(() => Deferred.succeed(plannerStopped, undefined)),
+        )
+
+      yield* Effect.gen(function* () {
+        const generation = yield* GuideGenerationService
+        const queries = yield* GuideQueryService
+        const guideId = yield* generation.start(pullRequestUrl, "claude")
+        yield* Deferred.await(plannerStarted)
+
+        yield* generation.delete(guideId)
+
+        assert.isTrue(yield* Deferred.isDone(plannerStopped))
+        assert.deepStrictEqual(yield* queries.listGuides, [])
+      }).pipe(
+        Effect.provide(
+          makeTestServerLayer(workspace, { planner: endlessPlanner, chapter: chapterWriter }),
+        ),
+      )
+    }),
+  )
 })

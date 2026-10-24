@@ -59,6 +59,9 @@ export interface GuideMutations {
     excerpt: Excerpt,
   ) => Effect.Effect<void>
   readonly addFlag: (guideId: GuideId, chapterKey: ChapterKey, flag: Flag) => Effect.Effect<void>
+  // The guide and everything about it, including draft comments not sent yet.
+  // Draft comments belong to reviews, but they can't outlive their guide.
+  readonly deleteGuide: (guideId: GuideId) => Effect.Effect<void>
   // Fails every guide still being planned or written whose writer process has
   // stopped, and its unfinished chapters, with the reason.
   readonly failAbandonedGuides: (
@@ -133,6 +136,7 @@ function makeGuideMutationService() {
         insertExcerpt(sql, guideId, chapterKey, excerpt).pipe(thenAnnounce(guideId)),
       addFlag: (guideId, chapterKey, flag) =>
         insertFlag(sql, guideId, chapterKey, flag).pipe(thenAnnounce(guideId)),
+      deleteGuide: (guideId) => deleteGuideAndItsRows(sql, guideId).pipe(thenAnnounce(guideId)),
       failAbandonedGuides: (reason, isWriterRunning) =>
         failAbandoned(sql, reason, isWriterRunning).pipe(Effect.orDie),
     })
@@ -178,6 +182,28 @@ function updateGuideStatus(
 ) {
   return sql`UPDATE guides SET status = ${status}, failure = ${failure} WHERE id = ${guideId}`
 }
+
+// Children first, the guide last, in one transaction: a guide is never left
+// half deleted.
+function deleteGuideAndItsRows(sql: SqlClient.SqlClient, guideId: GuideId) {
+  return sql.withTransaction(
+    Effect.gen(function* () {
+      for (const table of guideOwnedTables) {
+        yield* sql`DELETE FROM ${sql(table)} WHERE guideId = ${guideId}`
+      }
+      yield* sql`DELETE FROM guides WHERE id = ${guideId}`
+    }),
+  )
+}
+
+const guideOwnedTables = [
+  "draftComments",
+  "excerpts",
+  "flags",
+  "placements",
+  "chapters",
+  "hunks",
+] as const
 
 function failAbandoned(
   sql: SqlClient.SqlClient,

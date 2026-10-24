@@ -1,5 +1,5 @@
 import type { AgentCli, Chapter, GuideId } from "@proofroom/protocol"
-import { Cause, Context, Effect, Exit, FiberSet, Layer } from "effect"
+import { Cause, Context, Effect, Exit, FiberMap, Layer } from "effect"
 import type { ChildProcessSpawner } from "effect/process"
 import type { AgentRunnerService } from "../agents/AgentRunnerService.ts"
 import {
@@ -12,7 +12,7 @@ import { GuideQueryService } from "../storage/guides/GuideQueryService.ts"
 import { runChapter, type ChapterInput } from "./chapters/run-chapter.ts"
 import { runPlanner } from "./planning/run-planner.ts"
 
-// Makes a guide for a pull request.
+// Makes a guide for a pull request, and deletes one.
 //
 // start() loads the pull request and creates the guide, then returns its id
 // straight away; the guide is written in the background while the UI watches
@@ -26,12 +26,17 @@ import { runPlanner } from "./planning/run-planner.ts"
 // A chapter that fails doesn't fail the guide: its status says why, and the
 // other chapters are still worth reading.
 //
+// delete() first stops writing the guide, if it is still being written, so no
+// agent goes on writing to a guide that is gone. Stopping it also removes its
+// checkout.
+//
 // The layer brings PullRequestService. Storage, GitHub and the agent runner
 // are left for the caller, so the app and the tests can share one storage
 // wiring and swap the agent.
 
 export interface GuideGeneration {
   readonly start: (pullRequestUrl: string, cli: AgentCli) => Effect.Effect<GuideId, LoadFailed>
+  readonly delete: (guideId: GuideId) => Effect.Effect<void>
 }
 
 export class GuideGenerationService extends Context.Service<
@@ -54,8 +59,8 @@ function makeGuideGenerationService() {
     const mutations = yield* GuideMutationService
     const queries = yield* GuideQueryService
     const writingServices = yield* Effect.context<GuideWritingServices>()
-    // Guides being written. They stop when the app shuts down.
-    const guidesBeingWritten = yield* FiberSet.make()
+    // Guides being written, by id. They stop when the app shuts down.
+    const guidesBeingWritten = yield* FiberMap.make<GuideId>()
     // A guide whose writer stopped before finishing it, by a quit, a crash or
     // a reload, never will be finished. Guides another Proofroom process is
     // still writing, such as the generate-guide script's, are left alone.
@@ -76,8 +81,9 @@ function makeGuideGenerationService() {
           hunks: pullRequest.hunks,
           writerPid: process.pid,
         })
-        yield* FiberSet.run(
+        yield* FiberMap.run(
           guidesBeingWritten,
+          guideId,
           writeGuide(guideId, pullRequest, cli).pipe(Effect.provideContext(writingServices)),
         )
         return guideId
@@ -138,7 +144,13 @@ function makeGuideGenerationService() {
         .pipe(Effect.andThen(Effect.logWarning("guide failed", { guideId, reason })))
     }
 
-    return GuideGenerationService.of({ start })
+    const deleteGuide = (guideId: GuideId) =>
+      FiberMap.remove(guidesBeingWritten, guideId).pipe(
+        Effect.andThen(mutations.deleteGuide(guideId)),
+        Effect.andThen(Effect.logInfo("guide deleted", { guideId })),
+      )
+
+    return GuideGenerationService.of({ start, delete: deleteGuide })
   })
 }
 

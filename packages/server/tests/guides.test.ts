@@ -5,6 +5,8 @@ import { TestClock } from "effect/testing"
 import { GuideQueryService } from "../src/storage/guides/GuideQueryService.ts"
 import { GuideSubscriptionService } from "../src/storage/guides/GuideSubscriptionService.ts"
 import { GuideMutationService, type NewGuide } from "../src/storage/guides/GuideMutationService.ts"
+import { DraftMutationService } from "../src/storage/reviews/DraftMutationService.ts"
+import { DraftQueryService } from "../src/storage/reviews/DraftQueryService.ts"
 import { makeStorageLayer } from "../src/storage/StorageLayer.ts"
 
 // The app's own storage wiring, on an in-memory database. The layer is built
@@ -313,6 +315,39 @@ describe("guide storage", () => {
           ],
         )
       }).pipe(Effect.provide(StorageLayer)),
+  )
+
+  it.effect("guide deleted -> it, its hunks and its drafts are gone; other guides stay", () =>
+    Effect.gen(function* () {
+      const mutations = yield* GuideMutationService
+      const queries = yield* GuideQueryService
+      const draftMutations = yield* DraftMutationService
+      const drafts = yield* DraftQueryService
+      const keptId = yield* mutations.createGuide({ ...discountGuide, hunks: [couponHunk] })
+      const deletedId = yield* mutations.createGuide({ ...discountGuide, hunks: [signatureHunk] })
+      yield* mutations.addChapter(deletedId, {
+        key: discountsChapter,
+        title: "Discounts",
+        purpose: "cartTotal takes a percentage",
+      })
+      const anchor = { path: "src/cart/total.ts", side: "new", line: 3 } as const
+      yield* draftMutations.addDraft(deletedId, anchor, "Round after the discount?")
+      yield* draftMutations.addDraft(keptId, anchor, "Kept.")
+
+      yield* mutations.deleteGuide(deletedId)
+
+      assert.deepStrictEqual(
+        yield* Effect.exit(queries.loadGuide(deletedId)),
+        Exit.fail(new GuideNotFound({ guideId: deletedId })),
+      )
+      assert.deepStrictEqual(yield* drafts.listDrafts(deletedId), [])
+      assert.deepStrictEqual(
+        (yield* queries.listGuides).map((summary) => summary.id),
+        [keptId],
+      )
+      assert.deepStrictEqual(yield* queries.loadHunks(keptId), [couponHunk])
+      assert.strictEqual((yield* drafts.listDrafts(keptId)).length, 1)
+    }).pipe(Effect.provide(StorageLayer)),
   )
 
   it.effect("unknown guide id -> GuideNotFound, for the guide and for its hunks", () =>

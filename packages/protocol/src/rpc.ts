@@ -39,6 +39,11 @@ export class ProofroomRpcs extends RpcGroup.make(
     error: GuideNotFound,
     stream: true,
   }),
+  // Deletes the guide with its draft comments, stopping it first if it is
+  // still being written. Nothing on GitHub changes.
+  Rpc.make("deleteGuide", {
+    payload: Schema.Struct({ guideId: GuideId }),
+  }),
   Rpc.make("getHunks", {
     payload: Schema.Struct({ guideId: GuideId }),
     success: Schema.Array(Hunk),

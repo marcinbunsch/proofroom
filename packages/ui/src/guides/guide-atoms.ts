@@ -17,7 +17,7 @@ export const guideTabAtom = Atom.make<GuideTab>("guide")
 // in Diff" asked for one. The Diff tab clears it once it has scrolled.
 export const diffScrollTargetAtom = Atom.make<string | null>(null)
 
-// Every guide, newest first. Refreshed after a guide is started.
+// Every guide, newest first. Refreshed after a guide is started or deleted.
 export const guideListAtom = ProofroomClient.query("listGuides", undefined, {
   reactivityKeys: ["guides"],
 })
@@ -41,3 +41,4 @@ export const hunksAtom = Atom.family((guideId: GuideId) =>
 )
 
 export const startGuideAtom = ProofroomClient.mutation("generateGuide")
+export const deleteGuideAtom = ProofroomClient.mutation("deleteGuide")
