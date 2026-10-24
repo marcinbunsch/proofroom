@@ -9,10 +9,6 @@ import { AgentRunFailed, type AgentRun, type AgentRunResult } from "./agent-run.
 // from doing anything but reading. They were tested on Claude Code 2.1.280;
 // BOOTSTRAP.md records what each one is for.
 
-// Commands an agent may run to learn why code is the way it is. Anything not
-// listed is refused without asking.
-const readOnlyCommands = ["git log", "git show", "git blame", "git grep", "rg", "ls"]
-
 // Proofroom's tool server is registered under this name, so its tools reach
 // the agent as `mcp__proofroom__<tool>`.
 const toolServerName = "proofroom"
@@ -25,10 +21,9 @@ export function claudeCommand(
   configDir: string | null,
 ): Command {
   const mcpConfig = { mcpServers: { [toolServerName]: { type: "http", url: run.toolServer.url } } }
-  const allowedTools = [
-    ...run.toolServer.toolNames.map((toolName) => `mcp__${toolServerName}__${toolName}`),
-    ...readOnlyCommands.map((command) => `Bash(${command}:*)`),
-  ]
+  const allowedTools = run.toolServer.toolNames.map(
+    (toolName) => `mcp__${toolServerName}__${toolName}`,
+  )
   return {
     executable,
     args: [
@@ -39,8 +34,11 @@ export function claudeCommand(
       // The user's own settings, hooks and allow-lists stay out of the run.
       "--setting-sources",
       "",
+      // No Bash: an allow-list of shell commands can't be made read-only
+      // (`git log --output=<file>` writes any file). Git history comes from
+      // Proofroom's own tools instead.
       "--tools",
-      "Read,Grep,Glob,Bash",
+      "Read,Grep,Glob",
       "--allowedTools",
       ...allowedTools,
       "--permission-mode",

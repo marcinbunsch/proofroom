@@ -1,5 +1,6 @@
 import {
   ChapterToolkit,
+  HistoryToolkit,
   type AgentCli,
   type Chapter,
   type Guide,
@@ -9,6 +10,7 @@ import { Deferred, Effect, Layer, Schema } from "effect"
 import { McpServer } from "effect/ai"
 import { AgentRunnerService } from "../../agents/AgentRunnerService.ts"
 import { serveTools } from "../../agents/tool-server.ts"
+import { historyToolHandlers } from "../history-tools.ts"
 import type { LoadedPullRequest } from "../../pull-requests/PullRequestService.ts"
 import { chapterPrompt, type PlacedHunk } from "./chapter-prompt.ts"
 import { chapterToolHandlers } from "./chapter-tools.ts"
@@ -98,16 +100,23 @@ function serveChapterTools(
 ) {
   return Effect.gen(function* () {
     const handlers = yield* Layer.build(
-      chapterToolHandlers({
-        guideId: input.guideId,
-        chapterKey: input.chapter.key,
-        hunks: placedHunks.map((placed) => placed.hunk),
-        chapterFinished,
-      }),
+      Layer.merge(
+        chapterToolHandlers({
+          guideId: input.guideId,
+          chapterKey: input.chapter.key,
+          hunks: placedHunks.map((placed) => placed.hunk),
+          chapterFinished,
+        }),
+        historyToolHandlers(input.checkout),
+      ),
     )
-    const tools = McpServer.toolkit(ChapterToolkit).pipe(
-      Layer.provide(Layer.succeedContext(handlers)),
-    )
-    return yield* serveTools(tools, Object.keys(ChapterToolkit.tools))
+    const tools = Layer.merge(
+      McpServer.toolkit(ChapterToolkit),
+      McpServer.toolkit(HistoryToolkit),
+    ).pipe(Layer.provide(Layer.succeedContext(handlers)))
+    return yield* serveTools(tools, [
+      ...Object.keys(ChapterToolkit.tools),
+      ...Object.keys(HistoryToolkit.tools),
+    ])
   })
 }

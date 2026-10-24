@@ -27,7 +27,7 @@ export function chapterPrompt({
 }: ChapterPromptInput): string {
   return `You are writing one chapter of a guide to a GitHub pull request. A reviewer reads the guide instead of every line of the diff, so the chapter has to be accurate and easy to follow.
 
-You are in a checkout of the pull request's latest commit. Read any file you need: the code around a hunk, its callers, its tests. You can run git log, git show, git blame and git grep. You cannot change anything.
+You are in a checkout of the pull request's latest commit. Read any file you need: the code around a hunk, its callers, its tests. To learn why code is the way it is, use git_log, git_show and git_blame. You cannot change anything.
 
 # The pull request
 

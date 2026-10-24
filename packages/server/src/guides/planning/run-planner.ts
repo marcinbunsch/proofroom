@@ -1,8 +1,9 @@
-import { PlannerToolkit, type AgentCli, type GuideId } from "@proofroom/protocol"
+import { HistoryToolkit, PlannerToolkit, type AgentCli, type GuideId } from "@proofroom/protocol"
 import { Deferred, Effect, Layer, Schema } from "effect"
 import { McpServer } from "effect/ai"
 import { AgentRunnerService } from "../../agents/AgentRunnerService.ts"
 import { serveTools } from "../../agents/tool-server.ts"
+import { historyToolHandlers } from "../history-tools.ts"
 import type { LoadedPullRequest } from "../../pull-requests/PullRequestService.ts"
 import { plannerPrompt } from "./planner-prompt.ts"
 import { plannerToolHandlers } from "./planner-tools.ts"
@@ -74,11 +75,22 @@ export function runPlanner(input: PlannerInput) {
 function servePlannerTools(input: PlannerInput, planAccepted: Deferred.Deferred<void>) {
   return Effect.gen(function* () {
     const handlers = yield* Layer.build(
-      plannerToolHandlers({ guideId: input.guideId, hunks: input.pullRequest.hunks, planAccepted }),
+      Layer.merge(
+        plannerToolHandlers({
+          guideId: input.guideId,
+          hunks: input.pullRequest.hunks,
+          planAccepted,
+        }),
+        historyToolHandlers(input.checkout),
+      ),
     )
-    const tools = McpServer.toolkit(PlannerToolkit).pipe(
-      Layer.provide(Layer.succeedContext(handlers)),
-    )
-    return yield* serveTools(tools, Object.keys(PlannerToolkit.tools))
+    const tools = Layer.merge(
+      McpServer.toolkit(PlannerToolkit),
+      McpServer.toolkit(HistoryToolkit),
+    ).pipe(Layer.provide(Layer.succeedContext(handlers)))
+    return yield* serveTools(tools, [
+      ...Object.keys(PlannerToolkit.tools),
+      ...Object.keys(HistoryToolkit.tools),
+    ])
   })
 }

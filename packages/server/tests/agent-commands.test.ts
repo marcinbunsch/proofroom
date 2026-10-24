@@ -30,18 +30,14 @@ describe("claudeCommand", () => {
     assert.include(command.args, "--strict-mcp-config")
   })
 
-  it("permissions -> the run's tools and read-only commands allowed, everything else refused unasked", () => {
+  it("permissions -> the run's tools allowed, no shell, everything else refused unasked", () => {
     assert.includeMembers(
       [...command.args],
-      [
-        "mcp__proofroom__set_overview",
-        "mcp__proofroom__add_chapter",
-        "Bash(git log:*)",
-        "Bash(git blame:*)",
-      ],
+      ["mcp__proofroom__set_overview", "mcp__proofroom__add_chapter"],
     )
     assert.notInclude(command.args, "Write")
-    assert.strictEqual(valueAfter(command.args, "--tools"), "Read,Grep,Glob,Bash")
+    assert.isFalse(command.args.some((arg) => arg.startsWith("Bash")))
+    assert.strictEqual(valueAfter(command.args, "--tools"), "Read,Grep,Glob")
     assert.strictEqual(valueAfter(command.args, "--permission-mode"), "dontAsk")
     assert.strictEqual(valueAfter(command.args, "--permission-prompts"), "none")
     assert.strictEqual(valueAfter(command.args, "--setting-sources"), "")

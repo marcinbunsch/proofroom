@@ -123,3 +123,50 @@ export const FinishChapter = Tool.make("finish_chapter", {
 })
 
 export const ChapterToolkit = Toolkit.make(WriteChapter, ShowCode, AddFlag, FinishChapter)
+
+// --- both runs: the code's history ----------------------------------------------
+
+// What a run may learn from git about why the code is the way it is. These are
+// tools rather than shell commands because a shell allow-list can't be made
+// read-only: `git log --output=<file>` writes any file, `rg --pre` runs any
+// program. Here Proofroom runs git itself, with arguments it chose.
+
+// A commit hash as git_log prints it, never an option or a revision
+// expression.
+const CommitHash = Schema.String.check(Schema.isPattern(/^[0-9a-f]{7,40}$/))
+
+export const GitLog = Tool.make("git_log", {
+  description:
+    "The latest commits that changed a file, newest first: short hash, date, author and subject. Use it to learn why code is the way it is.",
+  parameters: Schema.Struct({
+    path: Schema.String,
+    maxCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(30)),
+  }),
+  success: Schema.String,
+  failure: ToolRejected,
+})
+
+export const GitShow = Tool.make("git_show", {
+  description:
+    "One commit by its hash: its full message and its changes, to one file if `path` is set or to every file if it is null.",
+  parameters: Schema.Struct({
+    commit: CommitHash,
+    path: Schema.NullOr(Schema.String),
+  }),
+  success: Schema.String,
+  failure: ToolRejected,
+})
+
+export const GitBlame = Tool.make("git_blame", {
+  description:
+    "Which commit last changed each line of a file, for a range of lines in the pull request's latest commit (line numbers in the file, not hunk-local ones).",
+  parameters: Schema.Struct({
+    path: Schema.String,
+    firstLine: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+    lastLine: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+  }),
+  success: Schema.String,
+  failure: ToolRejected,
+})
+
+export const HistoryToolkit = Toolkit.make(GitLog, GitShow, GitBlame)

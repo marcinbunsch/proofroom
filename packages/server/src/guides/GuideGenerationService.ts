@@ -1,5 +1,6 @@
 import type { AgentCli, Chapter, GuideId } from "@proofroom/protocol"
 import { Cause, Context, Effect, Exit, FiberSet, Layer } from "effect"
+import type { ChildProcessSpawner } from "effect/process"
 import type { AgentRunnerService } from "../agents/AgentRunnerService.ts"
 import {
   PullRequestService,
@@ -136,8 +137,12 @@ function makeGuideGenerationService() {
 // The services the planner and chapter runs use. They are captured when this
 // service is built and handed to each guide written in the background, so the
 // background work uses the same storage and agent runner as the rest of the
-// app.
-type GuideWritingServices = AgentRunnerService | GuideMutationService | GuideQueryService
+// app. The spawner runs git for the agents' history tools.
+type GuideWritingServices =
+  | AgentRunnerService
+  | GuideMutationService
+  | GuideQueryService
+  | ChildProcessSpawner.ChildProcessSpawner
 
 function failureReason(cause: Cause.Cause<unknown>): string {
   const failure = Cause.findErrorOption(cause)

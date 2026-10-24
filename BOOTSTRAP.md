@@ -295,9 +295,13 @@ Then, in this order:
 8. "Go deeper" and questions about a spot in the guide reuse the chapter-run
    path.
 
-**What the agents may do.** Read files, run read-only commands (`git log`,
-`git blame`, `rg`), and call Proofroom's MCP tools. They may not write
-files, use the network, or install anything. The app sets this once,
+**What the agents may do.** Read and search files, and call Proofroom's MCP
+tools, which include reading the code's history (`git_log`, `git_show`,
+`git_blame`). They may not write files, use the network, or install
+anything. Claude Code gets no shell at all: an allow-list of shell commands
+can't be made read-only, since `git log --output=<file>` writes any file and
+`rg --pre` runs any program. So Proofroom runs git itself, with arguments it
+chose, and the agent only names a commit or a file. The app sets this once,
 through each tool's own controls (Claude Code's allowed-tools list and
 Codex's read-only sandbox). So a run never stops to ask permission. The MCP
 server listens on the laptop only and needs a secret that is new for every
@@ -313,9 +317,8 @@ settings that made it work:
     server is loaded.
   - `--setting-sources ""`: the user's own settings, hooks and allow-lists
     are left out.
-  - `--tools "Read,Grep,Glob,Bash"`.
-  - `--allowedTools` listing the Proofroom MCP tools and the read-only
-    commands, e.g. `"Bash(git log:*)"`.
+  - `--tools "Read,Grep,Glob"`: no Bash.
+  - `--allowedTools` listing the Proofroom MCP tools.
   - `--permission-mode dontAsk` and `--permission-prompts none`: anything
     not allowed is refused, never asked about.
   - `--no-session-persistence --output-format stream-json`.
