@@ -206,9 +206,11 @@ These are the basics any review tool needs.
 - **Which repositories.** Only the ones you list in Settings. Nothing outside
   that list shows up.
 - **Comments.** You can comment on a line, on a file, or on the pull request
-  as a whole. Comments wait in a draft review until you submit them all
-  together, with a summary and a verdict. The author gets one notification
-  with everything. Replies to existing threads can post right away.
+  as a whole. Comments wait as drafts, saved in Proofroom only, until you
+  submit them all together with a summary and a verdict, in one call to
+  GitHub. The author gets one notification with everything. Drafts are not
+  mirrored to a GitHub pending review, so a review started in Proofroom is
+  finished in Proofroom. Replies to existing threads can post right away.
 - **Existing threads.** Other people's comment threads show next to the code,
   in both the guide and the Diff tab. You can reply, resolve and unresolve.
 - **Reviewers and labels.** You can change them.

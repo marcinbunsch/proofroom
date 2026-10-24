@@ -6,6 +6,8 @@ import { GuideMutationService } from "./guides/GuideMutationService.ts"
 import { GuideQueryService } from "./guides/GuideQueryService.ts"
 import { GuideSubscriptionService } from "./guides/GuideSubscriptionService.ts"
 import { databaseLayer } from "./migrations.ts"
+import { DraftMutationService } from "./reviews/DraftMutationService.ts"
+import { DraftQueryService } from "./reviews/DraftQueryService.ts"
 
 // The one place storage is put together. The app and the tests both build
 // storage through makeStorageLayer, so the tests check the same wiring the app
@@ -23,6 +25,8 @@ export function makeStorageLayer(databaseFile: string) {
     GuideQueryService.layer,
     GuideSubscriptionService.layer,
     GuideMutationService.layer,
+    DraftQueryService.layer,
+    DraftMutationService.layer,
   ).pipe(Layer.provide(databaseLayer(databaseFile)))
 }
 

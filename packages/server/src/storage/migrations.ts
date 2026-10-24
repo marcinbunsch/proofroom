@@ -10,7 +10,7 @@ export function databaseLayer(filename: string) {
   )
 }
 
-// Column names match the row schemas in guides/rows.ts.
+// Column names match the row schemas in guides/rows.ts and reviews/rows.ts.
 const migrations = SqliteMigrator.fromRecord({
   "0001_guides": Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -73,5 +73,20 @@ const migrations = SqliteMigrator.fromRecord({
         note TEXT NOT NULL
       )
     `
+  }),
+  "0002_draft_comments": Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    yield* sql`
+      CREATE TABLE draftComments (
+        id TEXT PRIMARY KEY,
+        guideId TEXT NOT NULL,
+        path TEXT NOT NULL,
+        side TEXT NOT NULL,
+        line INTEGER NOT NULL,
+        body TEXT NOT NULL,
+        createdAt TEXT NOT NULL
+      )
+    `
+    yield* sql`CREATE INDEX draftCommentsByGuide ON draftComments (guideId)`
   }),
 })

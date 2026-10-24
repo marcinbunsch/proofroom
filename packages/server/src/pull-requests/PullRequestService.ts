@@ -1,7 +1,7 @@
 import type { Hunk, PullRequestRef } from "@proofroom/protocol"
 import { Context, Effect, Layer, Semaphore, type Scope } from "effect"
 import { GitFailed, GitService } from "./GitService.ts"
-import { GitHubFailed, GitHubService } from "./GitHubService.ts"
+import { GitHubFailed, GitHubService } from "../github/GitHubService.ts"
 import { InvalidPullRequestUrl, parsePullRequestUrl } from "./pull-request-url.ts"
 
 // Turns a pull request URL into what a guide is written from: the pull

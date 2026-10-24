@@ -10,10 +10,10 @@ import { InvalidPullRequestUrl } from "../src/pull-requests/pull-request-url.ts"
 import { PullRequestService } from "../src/pull-requests/PullRequestService.ts"
 import {
   createCheckoutOrigin,
-  fakeGitHub,
   pullRequestUrl,
   type CheckoutOrigin,
 } from "./fixtures/checkout-origin.ts"
+import { FakeGitHub } from "./fixtures/FakeGitHub.ts"
 import type { OriginRepository } from "./fixtures/OriginRepository.ts"
 import { realProcessesTimeout } from "./fixtures/timeouts.ts"
 
@@ -21,7 +21,7 @@ import { realProcessesTimeout } from "./fixtures/timeouts.ts"
 // into a Proofroom home folder of its own.
 function pullRequestLayer(home: string, origin: OriginRepository) {
   return PullRequestService.layer.pipe(
-    Layer.provide(fakeGitHub),
+    Layer.provide(new FakeGitHub().layer),
     Layer.provide(Layer.succeed(GitRemoteUrl, () => origin.path)),
     Layer.provide(AppPaths.fromHome(home)),
     Layer.provide(NodeServices.layer),

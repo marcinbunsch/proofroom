@@ -1,5 +1,4 @@
-import { Effect, Layer } from "effect"
-import { GitHubService, type PullRequestDetails } from "../../src/pull-requests/GitHubService.ts"
+import type { PullRequestDetails } from "../../src/github/GitHubService.ts"
 import { OriginRepository } from "./OriginRepository.ts"
 
 // Pull request 482 on acme/checkout: the fixture most tests share. It adds a
@@ -13,12 +12,6 @@ export const discountDetails: PullRequestDetails = {
   baseRefName: "main",
   commits: [{ messageHeadline: "Add discountPercent to cartTotal", messageBody: "" }],
 }
-
-// GitHubService is the one part that talks to the network, so tests replace it.
-export const fakeGitHub = Layer.succeed(
-  GitHubService,
-  GitHubService.of({ fetchPullRequest: () => Effect.succeed(discountDetails) }),
-)
 
 // The repository as GitHub would hold it for pull request 482:
 //
