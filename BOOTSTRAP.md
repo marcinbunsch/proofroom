@@ -321,7 +321,8 @@ settings that made it work:
   - `--allowedTools` listing the Proofroom MCP tools.
   - `--permission-mode dontAsk` and `--permission-prompts none`: anything
     not allowed is refused, never asked about.
-  - `--no-session-persistence --output-format stream-json`.
+  - `--no-session-persistence --output-format json`: one JSON result when
+    the run ends, with its final message and cost.
   - `--bare` can't be used: it only accepts API keys, and we rely on the
     user's own login.
   - `CLAUDE_CONFIG_DIR` is passed on when set in Proofroom's environment, so
