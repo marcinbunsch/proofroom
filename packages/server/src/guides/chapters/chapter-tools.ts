@@ -15,6 +15,7 @@ import type { Tool } from "effect/ai"
 import { GuideMutationService } from "../../storage/guides/GuideMutationService.ts"
 import { GuideQueryService } from "../../storage/guides/GuideQueryService.ts"
 import { checkDiagram } from "../diagrams.ts"
+import type { PlacedHunk } from "./chapter-prompt.ts"
 
 // The tools for writing one chapter. As with the planner's tools, every call
 // is checked before anything is saved, and the database is the only record of
@@ -23,8 +24,9 @@ import { checkDiagram } from "../diagrams.ts"
 export interface ChapterRun {
   readonly guideId: GuideId
   readonly chapterKey: ChapterKey
-  // The hunks placed in this chapter. Flags may only point into these.
-  readonly hunks: ReadonlyArray<Hunk>
+  // The hunks, or parts of hunks, placed in this chapter. Flags and excerpts
+  // may only point at these lines.
+  readonly placedHunks: ReadonlyArray<PlacedHunk>
   // Completed by finish_chapter once the chapter has text.
   readonly chapterFinished: Deferred.Deferred<void>
 }
@@ -36,7 +38,7 @@ export function chapterToolHandlers(run: ChapterRun) {
     Effect.gen(function* () {
       const context: ChapterContext = {
         run,
-        hunksById: new Map(run.hunks.map((hunk) => [hunk.id, hunk])),
+        hunksById: new Map(run.placedHunks.map(({ hunk }) => [hunk.id, hunk])),
         queries: yield* GuideQueryService,
         mutations: yield* GuideMutationService,
       }
@@ -89,6 +91,18 @@ function showCode(context: ChapterContext, excerpt: Tool.Parameters<typeof ShowC
     }
     const problem = excerptProblem(hunk, excerpt.lines)
     if (problem !== null) return yield* new ToolRejected({ message: problem })
+    const showsThisChapter = hunk.lines.some(
+      (line, index) =>
+        line.kind !== "context" &&
+        excerpt.lines.start <= index + 1 &&
+        index + 1 <= excerpt.lines.end &&
+        isPlacedHere(context, hunk.id, index + 1),
+    )
+    if (!showsThisChapter) {
+      return yield* new ToolRejected({
+        message: `Lines ${excerpt.lines.start}-${excerpt.lines.end} of ${hunk.id} show none of this chapter's changes. ${linesPlacedHere(context, hunk.id)}`,
+      })
+    }
 
     const chapter = yield* loadChapter(context)
     if (chapter.excerpts.length >= maxExcerptsPerChapter) {
@@ -113,6 +127,11 @@ function addFlag(context: ChapterContext, flag: Tool.Parameters<typeof AddFlag>)
     if (!isLineInside) {
       return yield* new ToolRejected({
         message: `${flag.hunkId} has ${hunk.lines.length} lines; line ${flag.line} is out of range.`,
+      })
+    }
+    if (!isPlacedHere(context, hunk.id, flag.line)) {
+      return yield* new ToolRejected({
+        message: `Line ${flag.line} of ${hunk.id} belongs to another chapter. ${linesPlacedHere(context, hunk.id)}`,
       })
     }
     yield* context.mutations.addFlag(context.run.guideId, context.run.chapterKey, flag)
@@ -150,6 +169,23 @@ export function excerptProblem(hunk: Hunk, lines: HunkLineRange): string | null 
   if (!showsAChange)
     return `Lines ${lines.start}-${lines.end} of ${hunk.id} don't include a changed line.`
   return null
+}
+
+// The planner can split a hunk between chapters; a chapter only owns the lines
+// placed in it.
+function isPlacedHere(context: ChapterContext, hunkId: HunkId, line: number): boolean {
+  return context.run.placedHunks.some(
+    (placed) =>
+      placed.hunk.id === hunkId &&
+      (placed.lines === null || (placed.lines.start <= line && line <= placed.lines.end)),
+  )
+}
+
+function linesPlacedHere(context: ChapterContext, hunkId: HunkId): string {
+  const ranges = context.run.placedHunks
+    .filter((placed) => placed.hunk.id === hunkId && placed.lines !== null)
+    .map(({ lines }) => `${lines?.start}-${lines?.end}`)
+  return `This chapter has lines ${ranges.join(", ")} of it.`
 }
 
 // The guide and chapter are always there while the chapter is written; a

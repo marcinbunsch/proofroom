@@ -35,7 +35,8 @@ const chapterTimeLimit = "20 minutes"
 
 // Writes one chapter from start to finish:
 //
-// 1. Serve the chapter's tools, which only accept flags on its own hunks.
+// 1. Serve the chapter's tools, which only accept flags and excerpts on its
+//    own lines.
 // 2. Start the agent CLI with the chapter prompt, and wait for it to exit.
 // 3. Check finish_chapter was called after the chapter got its text.
 export function runChapter(input: ChapterInput) {
@@ -105,7 +106,7 @@ function serveChapterTools(
         chapterToolHandlers({
           guideId: input.guideId,
           chapterKey: input.chapter.key,
-          hunks: placedHunks.map((placed) => placed.hunk),
+          placedHunks,
           chapterFinished,
         }),
         historyToolHandlers(input.checkout),

@@ -316,4 +316,79 @@ describe("GuideGenerationService", realProcessesTimeout, () => {
       )
     }),
   )
+
+  it.effect("a hunk split between chapters -> flags and excerpts only on the chapter's part", () =>
+    Effect.gen(function* () {
+      const replies = yield* Ref.make<Array<ToolReply>>([])
+      // total.ts's hunk: lines 1-2 delete the old body, 3-5 add the new one,
+      // 6 is the closing brace. The rounded return (5) goes to coupons.
+      const splittingPlanner: AgentScript = (agent, run) =>
+        Effect.gen(function* () {
+          const hunkIds = hunkIdsByPath(run.prompt)
+          const totalHunkId = hunkIds.get("src/cart/total.ts")
+          yield* expectAccepted(agent.callTool("set_overview", overview))
+          yield* expectAccepted(agent.callTool("add_chapter", discountsChapter))
+          yield* expectAccepted(agent.callTool("add_chapter", couponsChapter))
+          const part = (start: number, end: number, chapterKey: string) => ({
+            ...placeIn(totalHunkId, chapterKey),
+            lines: { start, end },
+          })
+          yield* expectAccepted(
+            agent.callTool("place_hunks", {
+              placements: [
+                part(1, 4, "discounts"),
+                part(5, 6, "coupons"),
+                placeIn(hunkIds.get("src/cart/coupons.ts"), "coupons"),
+              ],
+            }),
+          )
+          yield* expectAccepted(agent.callTool("finish_plan", {}))
+          return "Plan accepted."
+        })
+      const discountsWriter: AgentScript = (agent, run) =>
+        Effect.gen(function* () {
+          if (chapterTitleIn(run.prompt) !== discountsChapter.title)
+            return yield* chapterWriter(agent, run)
+          const totalHunkId = hunkIdsByPath(run.prompt).get("src/cart/total.ts")
+          yield* expectAccepted(
+            agent.callTool("write_chapter", { body: "Discounts.", diagram: null }),
+          )
+          const flagOnCoupons = yield* agent.callTool("add_flag", {
+            hunkId: totalHunkId,
+            line: 5,
+            kind: "hidden-behaviour-change",
+            note: "Rounded now.",
+          })
+          const excerptOfCoupons = yield* agent.callTool("show_code", {
+            hunkId: totalHunkId,
+            lines: { start: 5, end: 6 },
+            why: "The rounding.",
+          })
+          yield* Ref.set(replies, [flagOnCoupons, excerptOfCoupons])
+          yield* expectAccepted(
+            agent.callTool("show_code", {
+              hunkId: totalHunkId,
+              lines: { start: 3, end: 5 },
+              why: "The new signature, and the return it feeds.",
+            }),
+          )
+          yield* expectAccepted(agent.callTool("finish_chapter", {}))
+          return "Chapter finished."
+        })
+
+      const { guide } = yield* generateGuide({
+        planner: splittingPlanner,
+        chapter: discountsWriter,
+      })
+      const [flagOnCoupons, excerptOfCoupons] = yield* Ref.get(replies)
+
+      assert.include(flagOnCoupons?.text, "belongs to another chapter. This chapter has lines 1-4")
+      assert.include(excerptOfCoupons?.text, "show none of this chapter's changes")
+      assert.deepStrictEqual(guide.chapters[0]?.flags, [])
+      assert.deepStrictEqual(
+        guide.chapters[0]?.excerpts.map((excerpt) => excerpt.lines),
+        [{ start: 3, end: 5 }],
+      )
+    }),
+  )
 })
