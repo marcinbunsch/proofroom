@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { ChapterKey, GuideId, GuideNotFound, HunkId, type Hunk } from "@proofroom/protocol"
-import { Deferred, Effect, Exit, Fiber, Stream } from "effect"
+import { Deferred, Effect, Exit, Fiber, Ref, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { GuideQueryService } from "../src/storage/guides/GuideQueryService.ts"
 import { GuideSubscriptionService } from "../src/storage/guides/GuideSubscriptionService.ts"
@@ -383,5 +383,39 @@ describe("guide storage", () => {
           ["writing", "Cart totals now take a discount."],
         )
       }).pipe(Effect.provide(StorageLayer)),
+  )
+
+  // Regression: every change queued a reload of its own, so a watcher slower
+  // than the writes fell further behind with each one.
+  it.live("50 changes while the watcher is busy -> a few versions, not one per change", () =>
+    Effect.gen(function* () {
+      const mutations = yield* GuideMutationService
+      const subscriptions = yield* GuideSubscriptionService
+      const guideId = yield* mutations.createGuide(discountGuide)
+
+      const versionsSeen = yield* Ref.make(0)
+      const firstVersionSeen = yield* Deferred.make<void>()
+      const watcherFree = yield* Deferred.make<void>()
+      const watcher = yield* subscriptions.watchGuide(guideId).pipe(
+        Stream.tap(() =>
+          Ref.update(versionsSeen, (count) => count + 1).pipe(
+            Effect.andThen(Deferred.succeed(firstVersionSeen, undefined)),
+            Effect.andThen(Deferred.await(watcherFree)),
+          ),
+        ),
+        Stream.runDrain,
+        Effect.forkChild,
+      )
+      yield* Deferred.await(firstVersionSeen)
+      for (let change = 1; change <= 50; change++) {
+        yield* mutations.setOverview(guideId, { summary: `Change ${change}`, diagram: null })
+      }
+      yield* Deferred.succeed(watcherFree, undefined)
+      // Long enough for 50 reloads of a small in-memory guide many times over.
+      yield* Effect.sleep("300 millis")
+      yield* Fiber.interrupt(watcher)
+
+      assert.isAtMost(yield* Ref.get(versionsSeen), 3)
+    }).pipe(Effect.provide(StorageLayer)),
   )
 })
