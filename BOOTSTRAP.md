@@ -135,6 +135,11 @@ files.
 5. You choose Claude Code or Codex as the default in Settings, plus a model
    if the tool has a choice. You can switch for a single guide from the
    Generate button. Each guide records which tool and model wrote it.
+6. You choose which account each tool runs as, per repository, in Settings:
+   for example a work Claude account for work repositories and a personal one
+   for your own. An account is the tool's config folder (`CLAUDE_CONFIG_DIR`
+   for Claude Code, `CODEX_HOME` for Codex). Until Settings exists, the two
+   environment variables set it for every repository.
 
 ### Changes since your last review
 
