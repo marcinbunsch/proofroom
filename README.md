@@ -18,6 +18,9 @@ Proofroom stores no API keys and no tokens. It uses tools you already have:
 - [Claude Code](https://claude.com/claude-code) (`claude`) or
   [Codex](https://github.com/openai/codex) (`codex`), logged in
 
+To run guides as another account, set `CLAUDE_CONFIG_DIR` or `CODEX_HOME` in
+`.env` (see [`.env.example`](.env.example)).
+
 ## Development
 
 ```sh

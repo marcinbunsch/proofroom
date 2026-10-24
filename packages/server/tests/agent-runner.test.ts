@@ -5,6 +5,7 @@ import { NodeServices } from "@effect/platform-node"
 import { afterEach, assert, beforeEach, describe, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import { AppPaths } from "../src/AppPaths.ts"
+import { AgentConfigFolders } from "../src/agents/AgentConfigFolders.ts"
 import { AgentExecutables } from "../src/agents/AgentExecutables.ts"
 import { AgentRunnerService } from "../src/agents/AgentRunnerService.ts"
 import { AgentRunFailed, type AgentRun } from "../src/agents/agent-run.ts"
@@ -23,11 +24,18 @@ describe("AgentRunnerService", realProcessesTimeout, () => {
     rmSync(workspace, { recursive: true, force: true })
   })
 
-  // The real runner, starting a stand-in script instead of the real CLI.
+  // The real runner, starting a stand-in script instead of the real CLI, as a
+  // work account with its own Claude and Codex folders.
   function runnerLayer(standIn: StandInCli) {
     return AgentRunnerService.layer.pipe(
       Layer.provide(
         Layer.succeed(AgentExecutables, { claude: standIn.executable, codex: standIn.executable }),
+      ),
+      Layer.provide(
+        Layer.succeed(AgentConfigFolders, {
+          claudeConfigDir: join(workspace, "claude-work"),
+          codexHome: join(workspace, "codex-work"),
+        }),
       ),
       Layer.provide(AppPaths.fromHome(join(workspace, "home"))),
       Layer.provide(NodeServices.layer),
@@ -64,26 +72,32 @@ describe("AgentRunnerService", realProcessesTimeout, () => {
         assert.strictEqual(started.stdin, "Write the chapter on rounding in cartTotal.")
         assert.strictEqual(started.workingDirectory, checkout)
         assert.include(started.args, "mcp__proofroom__write_chapter")
+        assert.strictEqual(started.claudeConfigDir, join(workspace, "claude-work"))
       }).pipe(Effect.provide(runnerLayer(standIn)))
     },
   )
 
-  it.effect("codex run -> started with the empty home folder, which is created first", () => {
-    const standIn = StandInCli.create(join(workspace, "codex"), {
-      output: JSON.stringify({
-        type: "item.completed",
-        item: { type: "agent_message", text: "Chapter finished." },
-      }),
-    })
-    return Effect.gen(function* () {
-      const runner = yield* AgentRunnerService
+  it.effect(
+    "codex run -> the empty home folder (created first) and the account's Codex folder",
+    () => {
+      const standIn = StandInCli.create(join(workspace, "codex"), {
+        output: JSON.stringify({
+          type: "item.completed",
+          item: { type: "agent_message", text: "Chapter finished." },
+        }),
+      })
+      return Effect.gen(function* () {
+        const runner = yield* AgentRunnerService
 
-      const result = yield* runner.run(chapterRun("codex"))
+        const result = yield* runner.run(chapterRun("codex"))
 
-      assert.deepStrictEqual(result, { finalMessage: "Chapter finished.", costUsd: null })
-      assert.strictEqual(standIn.recordedStart().home, join(workspace, "home", "agent-home"))
-    }).pipe(Effect.provide(runnerLayer(standIn)))
-  })
+        assert.deepStrictEqual(result, { finalMessage: "Chapter finished.", costUsd: null })
+        const started = standIn.recordedStart()
+        assert.strictEqual(started.home, join(workspace, "home", "agent-home"))
+        assert.strictEqual(started.codexHome, join(workspace, "codex-work"))
+      }).pipe(Effect.provide(runnerLayer(standIn)))
+    },
+  )
 
   it.effect("CLI exits with an error -> AgentRunFailed carrying what it printed to stderr", () => {
     const standIn = StandInCli.create(join(workspace, "claude"), { output: "", exitCode: 1 })

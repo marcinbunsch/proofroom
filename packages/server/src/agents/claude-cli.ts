@@ -17,7 +17,13 @@ const readOnlyCommands = ["git log", "git show", "git blame", "git grep", "rg", 
 // the agent as `mcp__proofroom__<tool>`.
 const toolServerName = "proofroom"
 
-export function claudeCommand(executable: string, run: AgentRun): Command {
+// `configDir` is the account's folder (CLAUDE_CONFIG_DIR), or null for
+// Claude Code's default ~/.claude.
+export function claudeCommand(
+  executable: string,
+  run: AgentRun,
+  configDir: string | null,
+): Command {
   const mcpConfig = { mcpServers: { [toolServerName]: { type: "http", url: run.toolServer.url } } }
   const allowedTools = [
     ...run.toolServer.toolNames.map((toolName) => `mcp__${toolServerName}__${toolName}`),
@@ -47,6 +53,7 @@ export function claudeCommand(executable: string, run: AgentRun): Command {
       ...(run.model === null ? [] : ["--model", run.model]),
     ],
     cwd: run.workingDirectory,
+    env: configDir === null ? undefined : { CLAUDE_CONFIG_DIR: configDir },
     stdin: run.prompt,
   }
 }

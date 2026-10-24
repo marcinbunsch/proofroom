@@ -21,7 +21,7 @@ function valueAfter(args: ReadonlyArray<string>, flag: string): string | undefin
 }
 
 describe("claudeCommand", () => {
-  const command = claudeCommand("claude", plannerRun)
+  const command = claudeCommand("claude", plannerRun, null)
 
   it("tool server -> the only MCP server, reached over HTTP", () => {
     assert.deepStrictEqual(JSON.parse(valueAfter(command.args, "--mcp-config") ?? ""), {
@@ -54,9 +54,15 @@ describe("claudeCommand", () => {
   })
 
   it("model chosen -> passed on; no model -> the CLI's default", () => {
-    const withModel = claudeCommand("claude", { ...plannerRun, model: "claude-opus-5-5" })
+    const withModel = claudeCommand("claude", { ...plannerRun, model: "claude-opus-5-5" }, null)
     assert.strictEqual(valueAfter(withModel.args, "--model"), "claude-opus-5-5")
     assert.notInclude(command.args, "--model")
+  })
+
+  it("account folder given -> run as that account; none -> Claude Code's default", () => {
+    const asWorkAccount = claudeCommand("claude", plannerRun, "/Users/ada/.claude-work")
+    assert.deepStrictEqual(asWorkAccount.env, { CLAUDE_CONFIG_DIR: "/Users/ada/.claude-work" })
+    assert.strictEqual(command.env, undefined)
   })
 })
 
@@ -96,7 +102,7 @@ describe("codexCommand", () => {
   const command = codexCommand(
     "codex",
     { ...plannerRun, cli: "codex" },
-    "/Users/ada/.proofroom/agent-home",
+    { codexHome: "/Users/ada/.codex-work", emptyHome: "/Users/ada/.proofroom/agent-home" },
   )
 
   it("sandbox and approvals -> read-only, and the tool server's tools approved up front", () => {
@@ -118,10 +124,11 @@ describe("codexCommand", () => {
     )
   })
 
-  it("home folder -> an empty one, while the real Codex folder keeps the login", () => {
-    assert.strictEqual(command.env?.HOME, "/Users/ada/.proofroom/agent-home")
-    assert.isString(command.env?.CODEX_HOME)
-    assert.notStrictEqual(command.env?.CODEX_HOME, "/Users/ada/.proofroom/agent-home/.codex")
+  it("folders -> an empty home folder, and the account's own Codex folder for the login", () => {
+    assert.deepStrictEqual(command.env, {
+      HOME: "/Users/ada/.proofroom/agent-home",
+      CODEX_HOME: "/Users/ada/.codex-work",
+    })
   })
 
   it("prompt -> read from stdin", () => {

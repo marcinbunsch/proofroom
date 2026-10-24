@@ -1,5 +1,3 @@
-import { homedir } from "node:os"
-import { join } from "node:path"
 import { Effect, Schema } from "effect"
 import type { Command } from "../process/run-command.ts"
 import { AgentRunFailed, type AgentRun, type AgentRunResult } from "./agent-run.ts"
@@ -12,7 +10,14 @@ import { AgentRunFailed, type AgentRun, type AgentRunResult } from "./agent-run.
 // else here keeps the run from asking permission, and keeps the user's own
 // setup (skills, memories, hooks, plugins) out of it.
 
-export function codexCommand(executable: string, run: AgentRun, emptyHome: string): Command {
+export interface CodexFolders {
+  // The account's folder (CODEX_HOME), where its login lives.
+  readonly codexHome: string
+  // An empty folder Codex gets as its home folder.
+  readonly emptyHome: string
+}
+
+export function codexCommand(executable: string, run: AgentRun, folders: CodexFolders): Command {
   return {
     executable,
     args: [
@@ -45,10 +50,10 @@ export function codexCommand(executable: string, run: AgentRun, emptyHome: strin
     cwd: run.workingDirectory,
     env: {
       // --ignore-user-config still lets Codex load personal skills from the
-      // home folder, so it gets an empty one. CODEX_HOME keeps pointing at the
-      // real Codex folder, where the user's login lives.
-      HOME: emptyHome,
-      CODEX_HOME: process.env.CODEX_HOME || join(homedir(), ".codex"),
+      // home folder, so it gets an empty one. CODEX_HOME points at the
+      // account's real Codex folder, where its login lives.
+      HOME: folders.emptyHome,
+      CODEX_HOME: folders.codexHome,
     },
     stdin: run.prompt,
   }

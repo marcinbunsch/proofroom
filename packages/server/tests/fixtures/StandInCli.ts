@@ -2,14 +2,16 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 // A shell script standing in for `claude` or `codex`. It records how it was
-// started (arguments, stdin, working folder, home folder), prints the output
-// it was given, and exits with the given code.
+// started (arguments, stdin, working folder, and the folders it was told to
+// use), prints the output it was given, and exits with the given code.
 
 export interface RecordedStart {
   readonly args: Array<string>
   readonly stdin: string
   readonly workingDirectory: string
   readonly home: string
+  readonly claudeConfigDir: string
+  readonly codexHome: string
 }
 
 export class StandInCli {
@@ -34,6 +36,8 @@ export class StandInCli {
         `cat > "${recordFolder}/stdin"`,
         `pwd -P > "${recordFolder}/cwd"`,
         `printf '%s' "$HOME" > "${recordFolder}/home"`,
+        `printf '%s' "$CLAUDE_CONFIG_DIR" > "${recordFolder}/claude-config-dir"`,
+        `printf '%s' "$CODEX_HOME" > "${recordFolder}/codex-home"`,
         `cat "${recordFolder}/output"`,
         `exit ${options.exitCode ?? 0}`,
         "",
@@ -50,6 +54,8 @@ export class StandInCli {
       stdin: read("stdin"),
       workingDirectory: read("cwd").trim(),
       home: read("home"),
+      claudeConfigDir: read("claude-config-dir"),
+      codexHome: read("codex-home"),
     }
   }
 }

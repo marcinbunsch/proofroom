@@ -312,6 +312,8 @@ settings that made it work:
   - `--no-session-persistence --output-format stream-json`.
   - `--bare` can't be used: it only accepts API keys, and we rely on the
     user's own login.
+  - `CLAUDE_CONFIG_DIR` is passed on when set in Proofroom's environment, so
+    guides can run as another account.
 - **Codex:** `codex exec`, plus:
   - `--json --ephemeral --ignore-user-config --ignore-rules -s read-only`.
   - `-c approval_policy="never"`.
@@ -321,7 +323,8 @@ settings that made it work:
   - `-c web_search="disabled"`, and `features.memories`, `features.hooks`,
     `features.plugins`, `features.apps` all set to false.
   - `HOME` pointed at an empty folder, with `CODEX_HOME` still pointing at
-    the real `~/.codex` so the user's login works. Without this, Codex
+    the real `~/.codex` so the user's login works. `CODEX_HOME` set in
+    Proofroom's environment picks another account instead. Without this, Codex
     loads the user's personal skills from `~/.agents/skills` even with
     `--ignore-user-config`.
 
