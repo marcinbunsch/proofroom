@@ -3,6 +3,7 @@ import {
   type AgentCli,
   type ChapterKey,
   type ChapterStatus,
+  type Excerpt,
   type Flag,
   type GuideStatus,
   type Hunk,
@@ -13,7 +14,7 @@ import {
 import { Context, DateTime, Effect, Layer, Schema } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 import { GuideSubscriptionService } from "./GuideSubscriptionService.ts"
-import { ChapterRow, FlagRow, GuideRow, HunkRow, PlacementRow } from "./rows.ts"
+import { ChapterRow, ExcerptRow, FlagRow, GuideRow, HunkRow, PlacementRow } from "./rows.ts"
 
 // Every change to a guide, one write per function: the mutations, in GraphQL
 // terms. GuideQueryService holds the reads.
@@ -50,6 +51,11 @@ export interface GuideMutations {
     guideId: GuideId,
     chapterKey: ChapterKey,
     text: ChapterText,
+  ) => Effect.Effect<void>
+  readonly addExcerpt: (
+    guideId: GuideId,
+    chapterKey: ChapterKey,
+    excerpt: Excerpt,
   ) => Effect.Effect<void>
   readonly addFlag: (guideId: GuideId, chapterKey: ChapterKey, flag: Flag) => Effect.Effect<void>
 }
@@ -114,6 +120,8 @@ function makeGuideMutationService() {
         updateChapterStatus(sql, guideId, chapterKey, status, failure).pipe(thenAnnounce(guideId)),
       writeChapter: (guideId, chapterKey, text) =>
         updateChapterText(sql, guideId, chapterKey, text).pipe(thenAnnounce(guideId)),
+      addExcerpt: (guideId, chapterKey, excerpt) =>
+        insertExcerpt(sql, guideId, chapterKey, excerpt).pipe(thenAnnounce(guideId)),
       addFlag: (guideId, chapterKey, flag) =>
         insertFlag(sql, guideId, chapterKey, flag).pipe(thenAnnounce(guideId)),
     })
@@ -234,6 +242,16 @@ function updateChapterText(
   `
 }
 
+function insertExcerpt(
+  sql: SqlClient.SqlClient,
+  guideId: GuideId,
+  chapterKey: ChapterKey,
+  excerpt: Excerpt,
+) {
+  const row = encodeExcerptRow({ chapterKey, ...excerpt })
+  return sql`INSERT INTO excerpts ${sql.insert({ guideId, ...row })}`
+}
+
 function insertFlag(
   sql: SqlClient.SqlClient,
   guideId: GuideId,
@@ -249,5 +267,6 @@ function insertFlag(
 const encodeGuideRow = Schema.encodeSync(GuideRow)
 const encodeHunkRow = Schema.encodeSync(HunkRow)
 const encodePlacementRow = Schema.encodeSync(PlacementRow)
+const encodeExcerptRow = Schema.encodeSync(ExcerptRow)
 const encodeFlagRow = Schema.encodeSync(FlagRow)
 const encodeDiagram = Schema.encodeSync(ChapterRow.fields.diagram)

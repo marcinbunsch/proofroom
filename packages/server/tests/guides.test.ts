@@ -186,7 +186,7 @@ describe("guide storage", () => {
     }).pipe(Effect.provide(StorageLayer)),
   )
 
-  it.effect("chapter written and flagged -> text, diagram and flags under that chapter only", () =>
+  it.effect("chapter written, flagged and excerpted -> all of it under that chapter only", () =>
     Effect.gen(function* () {
       const mutations = yield* GuideMutationService
       const queries = yield* GuideQueryService
@@ -216,6 +216,11 @@ describe("guide storage", () => {
         kind: "hidden-behaviour-change",
         note: "Rounding moved: totals for existing callers can change by a cent.",
       })
+      yield* mutations.addExcerpt(guideId, discountsChapter, {
+        hunkId: signatureHunk.id,
+        lines: { start: 1, end: 2 },
+        why: "The signature gains a discount, with 0 as the default.",
+      })
       yield* mutations.setChapterStatus(guideId, discountsChapter, "done", null)
       const [discounts, coupons] = (yield* queries.loadGuide(guideId)).chapters
 
@@ -226,7 +231,15 @@ describe("guide storage", () => {
         discounts?.flags.map((flag) => [flag.hunkId, flag.line, flag.kind]),
         [[signatureHunk.id, 2, "hidden-behaviour-change"]],
       )
+      assert.deepStrictEqual(discounts?.excerpts, [
+        {
+          hunkId: signatureHunk.id,
+          lines: { start: 1, end: 2 },
+          why: "The signature gains a discount, with 0 as the default.",
+        },
+      ])
       assert.deepStrictEqual(coupons?.flags, [])
+      assert.deepStrictEqual(coupons?.excerpts, [])
     }).pipe(Effect.provide(StorageLayer)),
   )
 

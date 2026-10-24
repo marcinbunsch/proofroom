@@ -17,6 +17,12 @@ export const couponsChapter = {
   purpose: "WELCOME10 is the first coupon code",
 }
 
+// Lines 3-5 of total.ts's hunk: the new signature and the rounded return.
+export const roundingExcerpt = {
+  lines: { start: 3, end: 5 },
+  why: "The total is now rounded after the discount, so results change by up to half a cent.",
+}
+
 export const overview = {
   summary: "Cart totals can now take a percentage discount. A first coupon code uses it.",
   diagram: {
@@ -59,6 +65,9 @@ export const chapterWriter: AgentScript = (agent, run) =>
     )
     if (title === discountsChapter.title) {
       const totalHunkId = hunkIdsByPath(run.prompt).get("src/cart/total.ts")
+      yield* expectAccepted(
+        agent.callTool("show_code", { hunkId: totalHunkId, ...roundingExcerpt }),
+      )
       yield* expectAccepted(
         agent.callTool("add_flag", {
           hunkId: totalHunkId,

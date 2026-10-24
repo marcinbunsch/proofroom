@@ -45,22 +45,26 @@ ${chapter.purpose}
 
 # What to do
 
-1. Call write_chapter with the chapter's text in Markdown. Explain what changed in this chapter and why, in plain short paragraphs. Refer to code by file and function name. Don't walk through the diff line by line; the reader sees the code next to your text. Don't repeat what other chapters cover. Add a Mermaid diagram if it makes the change easier to see, for example how data now flows or how a state changes.
+The reader will not read this chapter's code. The whole diff is one click away for when they want it. Your job is to make them understand the change without it, and to guide their focus to the few places that deserve it.
 
-2. Flag lines that deserve the reviewer's close attention with add_flag. Only flag real concerns:
+1. Call write_chapter with the chapter's text in Markdown. Explain what changed and why, in plain short paragraphs: what the code did before, what it does now, and what that means for anyone who uses it. Refer to code by file and function name. Don't walk through the diff; describe the change. Don't repeat what other chapters cover. Add a Mermaid diagram if it makes the change easier to see, for example how data now flows or how a state changes.
+
+2. Guide the reader's focus with show_code. Pick the lines that are important, interesting or problematic: the heart of a new algorithm, a subtle edge case, a surprising choice, the line a flag is about. Up to 3 excerpts, each up to 15 lines, each with a short \`why\` saying what to notice there. Most chapters need one or two. A chapter of routine changes may need none. If the reader would learn nothing from seeing the lines, don't show them.
+
+3. Flag lines that deserve the reviewer's close attention with add_flag. Only flag real concerns:
    - risky-logic: logic that is easy to get wrong, such as rounding, concurrency, or edge cases
    - hidden-behaviour-change: behaviour that changes inside what looks like a refactor
    - missing-tests: changed behaviour that no test covers
    - contradicts-description: code that doesn't do what the pull request says it does
-   A flag says where to look and why, not what to think. Most chapters need no flags or one or two.
+   A flag says where to look and why, not what to think. Show the flagged lines with show_code too, so the reader sees them. Most chapters need no flags or one or two.
 
-3. Call finish_chapter.
+4. Call finish_chapter.
 
 Put Mermaid labels that contain brackets, quotes or punctuation in double quotes: A["cartTotal(prices)"].
 
 # This chapter's hunks
 
-Lines are numbered from 1 within each hunk. add_flag uses these numbers.
+These are for you to read; the reader sees only what you show with show_code. Lines are numbered from 1 within each hunk; show_code and add_flag use these numbers.
 
 ${placedHunks.map(({ hunk, lines }) => hunkText(hunk, lines)).join("\n\n")}
 `

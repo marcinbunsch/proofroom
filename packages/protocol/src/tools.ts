@@ -1,7 +1,7 @@
 import { Schema } from "effect"
 import { Tool, Toolkit } from "effect/ai"
 import { ChapterKey, FlagKind, MermaidDiagram, Placement } from "./guide.ts"
-import { HunkId } from "./hunk.ts"
+import { HunkId, HunkLineRange } from "./hunk.ts"
 
 // The tools a CLI agent uses to hand a guide back to Proofroom, over MCP. Every
 // call is checked against its schema before the handler runs. A handler that
@@ -103,6 +103,18 @@ export const AddFlag = Tool.make("add_flag", {
   failure: ToolRejected,
 })
 
+export const ShowCode = Tool.make("show_code", {
+  description:
+    "Guide the reader's focus: show a few lines of this chapter's code that are important, interesting or problematic, such as the heart of a new algorithm, a subtle edge case, or the line a flag is about. The reader won't read the rest; it stays on the Diff tab. Up to 3 excerpts per chapter, each up to 15 lines, from this chapter's hunks, with at least one changed line; line numbers are hunk-local. Say in `why` what the reader should notice there.",
+  parameters: Schema.Struct({
+    hunkId: HunkId,
+    lines: HunkLineRange,
+    why: Schema.String,
+  }),
+  success: Confirmation,
+  failure: ToolRejected,
+})
+
 export const FinishChapter = Tool.make("finish_chapter", {
   description: "Call once the chapter is written.",
   parameters: Tool.EmptyParams,
@@ -110,4 +122,4 @@ export const FinishChapter = Tool.make("finish_chapter", {
   failure: ToolRejected,
 })
 
-export const ChapterToolkit = Toolkit.make(WriteChapter, AddFlag, FinishChapter)
+export const ChapterToolkit = Toolkit.make(WriteChapter, ShowCode, AddFlag, FinishChapter)

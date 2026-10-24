@@ -6,6 +6,8 @@ import {
   type GuideId,
   type Hunk,
   type HunkId,
+  type HunkLineRange,
+  type ShowCode,
   type WriteChapter,
 } from "@proofroom/protocol"
 import { Deferred, Effect } from "effect"
@@ -38,6 +40,7 @@ export function chapterToolHandlers(run: ChapterRun) {
       }
       return {
         write_chapter: (parameters) => writeChapter(context, parameters),
+        show_code: (parameters) => showCode(context, parameters),
         add_flag: (parameters) => addFlag(context, parameters),
         finish_chapter: () => finishChapter(context),
       }
@@ -70,6 +73,31 @@ function writeChapter(
   })
 }
 
+// The chapter points the reader at a few lines worth their focus; everything
+// else is on the Diff tab. The limits keep it to a few short excerpts, so the
+// guide doesn't turn back into the diff.
+function showCode(context: ChapterContext, excerpt: Tool.Parameters<typeof ShowCode>) {
+  return Effect.gen(function* () {
+    const hunk = context.hunksById.get(excerpt.hunkId)
+    if (hunk === undefined) {
+      return yield* new ToolRejected({
+        message: `${excerpt.hunkId} is not one of this chapter's hunks.`,
+      })
+    }
+    const problem = excerptProblem(hunk, excerpt.lines)
+    if (problem !== null) return yield* new ToolRejected({ message: problem })
+
+    const chapter = yield* loadChapter(context)
+    if (chapter.excerpts.length >= maxExcerptsPerChapter) {
+      return yield* new ToolRejected({
+        message: `This chapter already shows ${maxExcerptsPerChapter} excerpts, the most it may. Keep the ones that matter most.`,
+      })
+    }
+    yield* context.mutations.addExcerpt(context.run.guideId, context.run.chapterKey, excerpt)
+    return "Excerpt saved."
+  })
+}
+
 function addFlag(context: ChapterContext, flag: Tool.Parameters<typeof AddFlag>) {
   return Effect.gen(function* () {
     const hunk = context.hunksById.get(flag.hunkId)
@@ -98,6 +126,27 @@ function finishChapter(context: ChapterContext) {
     yield* Deferred.succeed(context.run.chapterFinished, undefined)
     return "Chapter finished. You are done; stop now."
   })
+}
+
+// 3 excerpts of up to 15 lines: enough to show the heart of a change or the
+// line a flag is about, too little to paste a whole hunk back in.
+const maxExcerptsPerChapter = 3
+const maxExcerptLines = 15
+
+export function excerptProblem(hunk: Hunk, lines: HunkLineRange): string | null {
+  const isInsideHunk = lines.start <= lines.end && lines.end <= hunk.lines.length
+  if (!isInsideHunk) {
+    return `${hunk.id} has ${hunk.lines.length} lines; ${lines.start}-${lines.end} is out of range.`
+  }
+  const lineCount = lines.end - lines.start + 1
+  if (lineCount > maxExcerptLines) {
+    return `An excerpt can be at most ${maxExcerptLines} lines; ${lines.start}-${lines.end} is ${lineCount}. Pick the lines that matter.`
+  }
+  const shownLines = hunk.lines.slice(lines.start - 1, lines.end)
+  const showsAChange = shownLines.some((line) => line.kind !== "context")
+  if (!showsAChange)
+    return `Lines ${lines.start}-${lines.end} of ${hunk.id} don't include a changed line.`
+  return null
 }
 
 // The guide and chapter are always there while the chapter is written; a

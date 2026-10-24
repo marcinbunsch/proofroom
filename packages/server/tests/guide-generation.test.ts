@@ -24,6 +24,7 @@ import {
   discountsChapter,
   overview,
   placeIn,
+  roundingExcerpt,
 } from "./fixtures/scripted-agents.ts"
 import { makeTestServerLayer } from "./fixtures/test-server.ts"
 import { realProcessesTimeout } from "./fixtures/timeouts.ts"
@@ -81,6 +82,10 @@ describe("GuideGenerationService", realProcessesTimeout, () => {
         assert.deepStrictEqual(
           guide.chapters[0]?.flags.map((flag) => flag.kind),
           ["hidden-behaviour-change"],
+        )
+        assert.deepStrictEqual(
+          guide.chapters[0]?.excerpts.map(({ lines, why }) => ({ lines, why })),
+          [roundingExcerpt],
         )
         assert.deepStrictEqual(checkCoverage(hunks, guide.placements), [])
       }),
@@ -200,6 +205,55 @@ describe("GuideGenerationService", realProcessesTimeout, () => {
         assert.include(flagRefusal?.text, "not one of this chapter's hunks")
         assert.deepStrictEqual(guide.overviewDiagram, overview.diagram)
         assert.strictEqual(guide.chapters[0]?.flags.length, 1)
+      }),
+  )
+
+  it.effect(
+    "excerpts from another chapter's hunk, or a fourth one -> refused, the first three kept",
+    () =>
+      Effect.gen(function* () {
+        const replies = yield* Ref.make<Array<ToolReply>>([])
+        const greedyWriter: AgentScript = (agent, run) =>
+          Effect.gen(function* () {
+            if (chapterTitleIn(run.prompt) !== discountsChapter.title)
+              return yield* chapterWriter(agent, run)
+            const totalHunkId = hunkIdsByPath(run.prompt).get("src/cart/total.ts")
+            const showLines = (start: number, end: number) =>
+              agent.callTool("show_code", {
+                hunkId: totalHunkId,
+                lines: { start, end },
+                why: "Worth a look.",
+              })
+            const fromOtherChapter = yield* agent.callTool("show_code", {
+              hunkId: "h0000000000",
+              lines: { start: 1, end: 1 },
+              why: "Not this chapter's code.",
+            })
+            yield* expectAccepted(showLines(1, 2))
+            yield* expectAccepted(showLines(3, 4))
+            yield* expectAccepted(showLines(5, 5))
+            const fourth = yield* showLines(1, 5)
+            yield* Ref.set(replies, [fromOtherChapter, fourth])
+            yield* expectAccepted(
+              agent.callTool("write_chapter", { body: "Discounts.", diagram: null }),
+            )
+            yield* expectAccepted(agent.callTool("finish_chapter", {}))
+            return "Chapter finished."
+          })
+
+        const { guide } = yield* generateGuide({ planner: completePlanner, chapter: greedyWriter })
+        const [fromOtherChapter, fourth] = yield* Ref.get(replies)
+
+        assert.include(fromOtherChapter?.text, "not one of this chapter's hunks")
+        assert.include(fourth?.text, "already shows 3 excerpts")
+        assert.deepStrictEqual(
+          guide.chapters[0]?.excerpts.map((excerpt) => excerpt.lines),
+          [
+            { start: 1, end: 2 },
+            { start: 3, end: 4 },
+            { start: 5, end: 5 },
+          ],
+        )
       }),
   )
 })

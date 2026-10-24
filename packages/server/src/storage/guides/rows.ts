@@ -11,6 +11,7 @@ import {
   MermaidDiagram,
   PlacementTarget,
   type Chapter,
+  type Excerpt,
   type Flag,
   type Guide,
   type GuideSummary,
@@ -68,6 +69,14 @@ export const FlagRow = Schema.Struct({
 })
 export type FlagRow = typeof FlagRow.Type
 
+export const ExcerptRow = Schema.Struct({
+  chapterKey: ChapterKey,
+  hunkId: HunkId,
+  lines: Schema.fromJsonString(HunkLineRange),
+  why: Schema.String,
+})
+export type ExcerptRow = typeof ExcerptRow.Type
+
 export const HunkRow = Schema.Struct({
   id: HunkId,
   // The hunk's place in the diff, so reads return hunks in diff order.
@@ -87,6 +96,7 @@ export interface GuideRows {
   readonly guide: GuideRow
   readonly chapters: ReadonlyArray<ChapterRow>
   readonly placements: ReadonlyArray<PlacementRow>
+  readonly excerpts: ReadonlyArray<ExcerptRow>
   readonly flags: ReadonlyArray<FlagRow>
 }
 
@@ -104,16 +114,19 @@ export function toGuide(rows: GuideRows): Guide {
     overviewDiagram: guide.overviewDiagram,
     failure: guide.failure,
     createdAt: guide.createdAt,
-    chapters: rows.chapters.map((chapter) => toChapter(chapter, rows.flags)),
+    chapters: rows.chapters.map((chapter) => toChapter(chapter, rows)),
     placements: rows.placements,
   }
 }
 
-function toChapter(chapter: ChapterRow, allFlags: ReadonlyArray<FlagRow>): Chapter {
-  const flags: Array<Flag> = allFlags
+function toChapter(chapter: ChapterRow, rows: GuideRows): Chapter {
+  const excerpts: Array<Excerpt> = rows.excerpts
+    .filter((excerpt) => excerpt.chapterKey === chapter.key)
+    .map(({ hunkId, lines, why }) => ({ hunkId, lines, why }))
+  const flags: Array<Flag> = rows.flags
     .filter((flag) => flag.chapterKey === chapter.key)
-    .map((flag) => ({ hunkId: flag.hunkId, line: flag.line, kind: flag.kind, note: flag.note }))
-  return { ...chapter, flags }
+    .map(({ hunkId, line, kind, note }) => ({ hunkId, line, kind, note }))
+  return { ...chapter, excerpts, flags }
 }
 
 export function toGuideSummary(row: GuideSummaryRow): GuideSummary {

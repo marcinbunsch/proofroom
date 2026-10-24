@@ -89,4 +89,16 @@ const migrations = SqliteMigrator.fromRecord({
     `
     yield* sql`CREATE INDEX draftCommentsByGuide ON draftComments (guideId)`
   }),
+  "0003_excerpts": Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    yield* sql`
+      CREATE TABLE excerpts (
+        guideId TEXT NOT NULL,
+        chapterKey TEXT NOT NULL,
+        hunkId TEXT NOT NULL,
+        lines TEXT NOT NULL,
+        why TEXT NOT NULL
+      )
+    `
+  }),
 })

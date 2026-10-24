@@ -64,6 +64,17 @@ export const Flag = Schema.Struct({
 })
 export type Flag = typeof Flag.Type
 
+// A few lines of code a chapter shows to guide the reader's focus: the
+// important, interesting or problematic parts. The rest of the chapter's code
+// is on the Diff tab.
+export const Excerpt = Schema.Struct({
+  hunkId: HunkId,
+  lines: HunkLineRange,
+  // Why these lines are worth seeing, shown above them.
+  why: Schema.String,
+})
+export type Excerpt = typeof Excerpt.Type
+
 export const ChapterStatus = Schema.Literals(["waiting", "writing", "done", "failed"])
 export type ChapterStatus = typeof ChapterStatus.Type
 
@@ -77,6 +88,8 @@ export const Chapter = Schema.Struct({
   status: ChapterStatus,
   body: Schema.NullOr(Schema.String),
   diagram: Schema.NullOr(MermaidDiagram),
+  // In the order the writer chose them.
+  excerpts: Schema.Array(Excerpt),
   flags: Schema.Array(Flag),
   failure: Schema.NullOr(Schema.String),
 })
